@@ -1,0 +1,108 @@
+# ============================================
+# Docker Compose - Development Configuration
+# ============================================
+# Use this for local development with all services
+
+services:
+  # ----------------------------------------
+  # API Service
+  # ----------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: doctor-onboarding-api
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=development
+      - DEBUG=true
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/doctor_onboarding
+      - REDIS_URL=redis://redis:6379/0
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - CORS_ORIGINS=http://localhost:3000
+      - LOG_LEVEL=INFO
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/live')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - ./src:/app/src:ro  # Mount source for development
+    networks:
+      - doctor-network
+
+  # ----------------------------------------
+  # PostgreSQL Database
+  # ----------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: doctor-onboarding-db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=doctor_onboarding
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - doctor-network
+
+  # ----------------------------------------
+  # Redis (OTP Storage & Caching)
+  # ----------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: doctor-onboarding-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - doctor-network
+
+  # ----------------------------------------
+  # Database Admin (Optional)
+  # ----------------------------------------
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: doctor-onboarding-pgadmin
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@admin.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
+    networks:
+      - doctor-network
+    profiles:
+      - tools  # Only start with: docker compose --profile tools up
+
+networks:
+  doctor-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
