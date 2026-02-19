@@ -17,6 +17,7 @@ from ....services.voice_service import (
     get_voice_service,
 )
 
+from ....core.rbac import CurrentUser
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/voice", tags=["Voice Onboarding"])
@@ -32,6 +33,10 @@ class StartSessionRequest(BaseModel):
         default="en",
         description="Language code for the conversation (e.g., 'en', 'es', 'hi')",
         examples=["en", "es", "hi"],
+    )
+    context: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional context including field definitions for the current step",
     )
     
     model_config = {
@@ -75,6 +80,10 @@ class ChatRequest(BaseModel):
         max_length=2000,
         description="User's speech transcript",
         examples=["My name is Dr. Sarah Johnson"],
+    )
+    context: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional context including field definitions for the current step",
     )
     
     model_config = {
@@ -189,6 +198,7 @@ VoiceServiceDep = Annotated[VoiceOnboardingService, Depends(get_voice_svc)]
 
 
 def build_fields_status(session: VoiceSession) -> list[FieldStatusItem]:
+    active_config = session._get_active_config()
     return [
         FieldStatusItem(
             field_name=field_name,
@@ -197,7 +207,7 @@ def build_fields_status(session: VoiceSession) -> list[FieldStatusItem]:
             value=session.collected_data.get(field_name),
             confidence=session.field_confidence.get(field_name, 0.0),
         )
-        for field_name, cfg in FIELD_CONFIG.items()
+        for field_name, cfg in active_config.items()
     ]
 
 
@@ -229,13 +239,30 @@ Start a new voice-based doctor onboarding session.
         503: {"description": "AI service unavailable"},
     },
 )
-async def start_session(request: StartSessionRequest, service: VoiceServiceDep) -> StartSessionResponse:
-    session, greeting = await service.start_session(language=request.language)
+async def start_session(
+    request: StartSessionRequest, 
+    service: VoiceServiceDep,
+    current_user: CurrentUser,
+) -> StartSessionResponse:
+    # Prepare initial data from user profile
+    initial_data = {}
+    # We only skip the phone number as it's the primary identifier.
+    # The user wants the AI to ask for the email.
+    if current_user.phone:
+        initial_data["phone"] = current_user.phone
+
+    session, greeting = await service.start_session(
+        language=request.language, 
+        context=request.context,
+        initial_data=initial_data
+    )
+    # Calculate fields total based on active config (context or default)
+    active_config = session._get_active_config()
     return StartSessionResponse(
         session_id=session.session_id,
         status=session.status.value,
         greeting=greeting,
-        fields_total=len(FIELD_CONFIG),
+        fields_total=len(active_config),
         created_at=session.created_at,
     )
 
@@ -275,13 +302,15 @@ async def process_chat(request: ChatRequest, service: VoiceServiceDep) -> ChatRe
         session, ai_response = await service.process_message(
             session_id=request.session_id,
             user_message=request.user_transcript,
+            context=request.context,
         )
+        active_config = session._get_active_config()
         return ChatResponse(
             session_id=session.session_id,
             status=session.status.value,
             ai_response=ai_response,
             fields_collected=len(session.collected_fields),
-            fields_total=len(FIELD_CONFIG),
+            fields_total=len(active_config),
             fields_status=build_fields_status(session),
             current_data=session.collected_data,
             is_complete=session.is_complete,
@@ -317,12 +346,13 @@ Retrieve the current status of a voice onboarding session.
 async def get_session_status(session_id: str, service: VoiceServiceDep) -> SessionStatusResponse:
     try:
         session = await service.get_session_status(session_id)
+        active_config = session._get_active_config()
         return SessionStatusResponse(
             session_id=session.session_id,
             status=session.status.value,
             language=session.language,
             fields_collected=len(session.collected_fields),
-            fields_total=len(FIELD_CONFIG),
+            fields_total=len(active_config),
             fields_status=build_fields_status(session),
             current_data=session.collected_data,
             is_complete=session.is_complete,
@@ -371,10 +401,11 @@ async def finalize_session(session_id: str, service: VoiceServiceDep) -> Finaliz
         
         if not session.is_complete:
             # Get missing fields for better error message
+            active_config = session._get_active_config()
             missing_fields = [
-                FIELD_CONFIG[field]["display"]
+                active_config[field]["display"]
                 for field in session.missing_fields
-                if field in FIELD_CONFIG and FIELD_CONFIG[field]["required"]
+                if field in active_config and active_config[field]["required"]
             ]
             
             error_detail = {
@@ -382,7 +413,7 @@ async def finalize_session(session_id: str, service: VoiceServiceDep) -> Finaliz
                 "message": f"Missing {len(missing_fields)} required field(s)",
                 "missing_fields": missing_fields,
                 "fields_collected": len(session.collected_fields),
-                "fields_required": len([f for f, cfg in FIELD_CONFIG.items() if cfg["required"]]),
+                "fields_required": len([f for f, cfg in active_config.items() if cfg["required"]]),
             }
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

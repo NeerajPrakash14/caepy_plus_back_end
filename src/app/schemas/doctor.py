@@ -216,8 +216,51 @@ class DoctorUpdate(BaseModel):
     
     All fields are optional - only provided fields are updated.
     """
-
     
+    # Block 1: Professional Identity
+    full_name: str | None = None
+    specialty: str | None = None
+    primary_practice_location: str | None = None
+    centres_of_practice: list[str] | None = None
+    years_of_clinical_experience: int | None = None
+    years_post_specialisation: int | None = None
+
+    # Block 2: Credentials & Trust Markers
+    year_of_mbbs: int | None = None
+    year_of_specialisation: int | None = None
+    fellowships: list[str] | None = None
+    qualifications: list[str] | None = None
+    professional_memberships: list[str] | None = None
+    awards_academic_honours: list[str] | None = None
+
+    # Block 3: Clinical Focus & Expertise
+    areas_of_clinical_interest: list[str] | None = None
+    practice_segments: str | None = None
+    conditions_commonly_treated: list[str] | None = None
+    conditions_known_for: list[str] | None = None
+    conditions_want_to_treat_more: list[str] | None = None
+
+    # Block 4: The Human Side
+    training_experience: list[str] | None = None
+    motivation_in_practice: list[str] | None = None
+    unwinding_after_work: list[str] | None = None
+    recognition_identity: list[str] | None = None
+    quality_time_interests: list[str] | None = None
+    quality_time_interests_text: str | None = None
+    professional_achievement: str | None = None
+    personal_achievement: str | None = None
+    professional_aspiration: str | None = None
+    personal_aspiration: str | None = None
+
+    # Block 5: Patient Value & Choice Factors
+    what_patients_value_most: str | None = None
+    approach_to_care: str | None = None
+    availability_philosophy: str | None = None
+
+    # Block 6: Content Seed (repeatable)
+    content_seeds: list[dict[str, Any]] | None = None
+
+    # Existing fields (legacy/compatibility)
     title: str | None = None
     gender: str | None = None
     first_name: str | None = Field(default=None, min_length=1, max_length=100)
@@ -244,7 +287,6 @@ class DoctorUpdate(BaseModel):
     achievement_images: list[str] | None = None
     external_links: list[str] | None = None
     practice_locations: list[PracticeLocationBase] | None = None
-    qualifications: list[str] | None = None  # Simple string list, e.g., ["MBBS", "MD Cardiology"]
 
 class DoctorResponse(BaseModel):
     """
@@ -286,6 +328,7 @@ class DoctorResponse(BaseModel):
     practice_locations: list[PracticeLocationBase] = Field(default_factory=list)
     qualifications: list[str] = Field(default_factory=list)  # Simple string list (e.g., ["MBBS", "MD Cardiology"])
     onboarding_source: str | None = None
+    role: str = "user"
     created_at: datetime | None = None
     updated_at: datetime | None = None
     

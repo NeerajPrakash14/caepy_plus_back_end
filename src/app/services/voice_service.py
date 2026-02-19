@@ -182,19 +182,39 @@ class VoiceSession:
         """Check if session has expired."""
         return datetime.now(UTC) > self.expires_at
     
+    def _get_active_config(self) -> dict[str, dict[str, Any]]:
+        """
+        Get active field configuration.
+        Prioritizes context-specific fields from metadata over global defaults.
+        """
+        context_fields = self.metadata.get("context", {}).get("fields")
+        if context_fields:
+            return {
+                f["key"]: {
+                    "display": f["label"],
+                    "order": i + 1,
+                    "required": f.get("required", False),
+                    "validator": lambda x: True,  # Trust AI extraction for dynamic fields
+                }
+                for i, f in enumerate(context_fields)
+            }
+        return FIELD_CONFIG
+
     @property
     def collected_fields(self) -> list[str]:
         """List of successfully collected field names."""
+        config = self._get_active_config()
         return [
-            f for f, cfg in FIELD_CONFIG.items()
+            f for f, cfg in config.items()
             if f in self.collected_data and cfg["validator"](self.collected_data[f])
         ]
     
     @property
     def missing_fields(self) -> list[str]:
         """List of required fields not yet collected."""
+        config = self._get_active_config()
         return [
-            f for f, cfg in FIELD_CONFIG.items()
+            f for f, cfg in config.items()
             if cfg["required"] and f not in self.collected_fields
         ]
     
@@ -210,10 +230,11 @@ class VoiceSession:
         if not missing:
             return None
         
+        config = self._get_active_config()
         # Sort by order and return first
         sorted_missing = sorted(
             missing,
-            key=lambda f: FIELD_CONFIG[f]["order"]
+            key=lambda f: config[f]["order"]
         )
         return sorted_missing[0] if sorted_missing else None
     
@@ -406,18 +427,34 @@ class VoiceOnboardingService:
         
         return session
     
-    async def start_session(self, language: str = "en") -> tuple[VoiceSession, str]:
+    async def start_session(
+        self,
+        language: str = "en",
+        context: dict[str, Any] | None = None,
+        initial_data: dict[str, Any] | None = None,
+    ) -> tuple[VoiceSession, str]:
         """
         Start a new voice onboarding session.
         
         Args:
             language: Primary conversation language
+            context: Optional context including dynamic field definitions
+            initial_data: Optional pre-collected data (e.g., from user profile)
             
         Returns:
             Tuple of (session, greeting_text)
         """
         # Create new session
         session = VoiceSession.create(language=language)
+        
+        if context:
+            session.metadata["context"] = context
+        
+        # Populate initial collected data
+        if initial_data:
+            session.collected_data.update(initial_data)
+            # Update current field to skip collected ones
+            session.current_field = session.next_field
         
         # Get greeting from prompts
         greeting = self.prompts.get("voice_onboarding.greeting")
@@ -439,7 +476,7 @@ class VoiceOnboardingService:
         # Save session
         await self.store.save(session)
         
-        logger.info(f"Started voice session: {session.session_id}")
+        logger.info(f"Started voice session: {session.session_id} with context keys: {list((context or {}).keys())}")
         
         return session, greeting
     
@@ -447,24 +484,25 @@ class VoiceOnboardingService:
         self,
         session_id: str,
         user_message: str,
+        context: dict[str, Any] | None = None,
     ) -> tuple[VoiceSession, str]:
         """
         Process user message and generate AI response.
         
-        This is the core conversation loop:
-        1. Retrieve session state
-        2. Build context prompt
-        3. Call AI for extraction + response
-        4. Update session state
-        5. Return response
-        
         Args:
             session_id: Session identifier
             user_message: Transcribed user speech
+            context: Optional context including dynamic field definitions
             
         Returns:
-            Tuple of (updated_session, ai_response_text)
+            Tuple of (Updated Session, AI Response)
         """
+        # This is the core conversation loop:
+        # 1. Retrieve session state
+        # 2. Build context prompt
+        # 3. Call AI for extraction + response
+        # 4. Update session state
+        # 5. Return response
         # Get and validate session
         session = await self._get_session(session_id)
         session = session.extend_expiry()
@@ -489,18 +527,21 @@ class VoiceOnboardingService:
             new_data = session.collected_data.copy()
             new_confidence = session.field_confidence.copy()
             
+            # Get active config for validation
+            active_config = session._get_active_config()
+            
             # Apply extractions
             for field_name, value in ai_result.extracted_fields.items():
-                if field_name in FIELD_CONFIG and value is not None:
+                if field_name in active_config and value is not None:
                     # Validate before accepting
-                    if FIELD_CONFIG[field_name]["validator"](value):
+                    if active_config[field_name]["validator"](value):
                         new_data[field_name] = self._normalize_value(field_name, value)
                         new_confidence[field_name] = ai_result.confidence.get(field_name, 0.8)
                         logger.debug(f"Extracted {field_name}: {value}")
             
             # Apply corrections
             for field_name, value in ai_result.corrections.items():
-                if field_name in FIELD_CONFIG and value is not None:
+                if field_name in active_config and value is not None:
                     new_data[field_name] = self._normalize_value(field_name, value)
                     new_confidence[field_name] = ai_result.confidence.get(field_name, 0.9)
                     logger.debug(f"Corrected {field_name}: {value}")
@@ -538,7 +579,7 @@ class VoiceOnboardingService:
             
             logger.info(
                 f"Session {session_id}: turn {session.turn_count}, "
-                f"collected {len(session.collected_fields)}/{len(FIELD_CONFIG)}"
+                f"collected {len(session.collected_fields)}/{len(active_config)}"
             )
             
             return session, ai_result.response_text
@@ -645,6 +686,7 @@ class VoiceOnboardingService:
     
     def _normalize_value(self, field_name: str, value: Any) -> Any:
         """Normalize extracted values by field type."""
+        # Handle explicitly known fields first
         if field_name == RequiredField.YEARS_OF_EXPERIENCE.value:
             # Convert to integer
             if isinstance(value, str):
@@ -669,6 +711,13 @@ class VoiceOnboardingService:
                 cleaned = "".join(c for c in str(value) if c.isdigit() or c == "+")
                 return cleaned
             return None
+            
+        # Generic handling for other fields
+        if isinstance(value, list):
+            return value
+            
+        if isinstance(value, dict):
+            return value
         
         # Default: strip strings
         return str(value).strip() if value else value

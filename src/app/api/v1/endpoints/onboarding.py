@@ -44,6 +44,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/onboarding")
 
+from ....core.rbac import AdminOrOperationalUser
+
 def get_extraction_svc():
     """Dependency to get extraction service."""
     return get_extraction_service()
@@ -656,6 +658,123 @@ async def submit_profile(
             "doctor_id": doctor.id,
             "previous_status": previous_status,
             "new_status": doctor.onboarding_status,
+        },
+    )
+
+@router.post(
+    "/verify/{doctor_id}",
+    response_model=GenericResponse[dict],
+    summary="Verify a doctor profile (Admin/Operational only)",
+)
+async def verify_profile(
+    doctor_id: int,
+    db: DbSession,
+    current_user: AdminOrOperationalUser,
+) -> GenericResponse[dict]:
+    """
+    Mark a doctor profile as verified.
+    
+    Requires Admin or Operational role.
+    """
+    from ....repositories.doctor_repository import DoctorRepository
+
+    doctor_repo = DoctorRepository(db)
+    repo = OnboardingRepository(db)
+
+    # Update the primary doctors table
+    doctor = await doctor_repo.get_by_id(doctor_id)
+    if doctor is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Doctor not found",
+        )
+
+    now = datetime.now(UTC)
+    previous_status = doctor.onboarding_status
+
+    doctor.onboarding_status = "verified"
+    doctor.updated_at = now
+
+    # Also update doctor_identity if it exists
+    identity = await repo.get_identity_by_doctor_id(doctor_id)
+    if identity is not None:
+        identity.onboarding_status = OnboardingStatus.VERIFIED
+        identity.verified_at = now
+        identity.status_updated_at = now
+        identity.status_updated_by = str(current_user.id)
+        identity.updated_at = now
+
+    await db.commit()
+    await db.refresh(doctor)
+
+    return GenericResponse(
+        message="Profile verified successfully",
+        data={
+            "doctor_id": doctor.id,
+            "previous_status": previous_status,
+            "new_status": doctor.onboarding_status,
+            "verified_at": now,
+        },
+    )
+
+class RejectProfilePayload(BaseModel):
+    reason: str | None = None
+
+@router.post(
+    "/reject/{doctor_id}",
+    response_model=GenericResponse[dict],
+    summary="Reject a doctor profile (Admin/Operational only)",
+)
+async def reject_profile(
+    doctor_id: int,
+    payload: RejectProfilePayload,
+    db: DbSession,
+    current_user: AdminOrOperationalUser,
+) -> GenericResponse[dict]:
+    """
+    Mark a doctor profile as rejected.
+    
+    Requires Admin or Operational role.
+    Optionally provide a rejection reason.
+    """
+    from ....repositories.doctor_repository import DoctorRepository
+
+    doctor_repo = DoctorRepository(db)
+    repo = OnboardingRepository(db)
+
+    # Update the primary doctors table
+    doctor = await doctor_repo.get_by_id(doctor_id)
+    if doctor is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Doctor not found",
+        )
+
+    now = datetime.now(UTC)
+    previous_status = doctor.onboarding_status
+
+    doctor.onboarding_status = "rejected"
+    doctor.updated_at = now
+
+    # Also update doctor_identity if it exists
+    identity = await repo.get_identity_by_doctor_id(doctor_id)
+    if identity is not None:
+        identity.onboarding_status = OnboardingStatus.REJECTED
+        identity.rejection_reason = payload.reason
+        identity.status_updated_at = now
+        identity.status_updated_by = str(current_user.id)
+        identity.updated_at = now
+
+    await db.commit()
+    await db.refresh(doctor)
+
+    return GenericResponse(
+        message="Profile rejected successfully",
+        data={
+            "doctor_id": doctor.id,
+            "previous_status": previous_status,
+            "new_status": doctor.onboarding_status,
+            "reason": payload.reason,
         },
     )
 

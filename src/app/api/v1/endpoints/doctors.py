@@ -65,19 +65,20 @@ async def create_doctor(
 
 @router.get(
     "",
-    response_model=PaginatedResponse[DoctorSummary],
+    response_model=PaginatedResponse[DoctorResponse],
     summary="List all doctors",
-    description="Get a paginated list of all registered doctors.",
+    description="Get a paginated list of all registered doctors with full details.",
 )
 async def list_doctors(
     repo: Annotated[DoctorRepository, Depends(get_doctor_repository)],
     page: int = Query(default=1, ge=1, description="Page number"),
     page_size: int = Query(default=20, ge=1, le=100, description="Items per page"),
     specialization: str | None = Query(default=None, description="Filter by specialization"),
-) -> PaginatedResponse[DoctorSummary]:
+) -> PaginatedResponse[DoctorResponse]:
     """
     List doctors with pagination.
     
+    Returns full doctor details including onboarding_status and role.
     Supports filtering by specialization using partial matching.
     """
     skip = (page - 1) * page_size
@@ -91,7 +92,7 @@ async def list_doctors(
     
     return PaginatedResponse(
         message="Doctors retrieved successfully",
-        data=[DoctorSummary.model_validate(d) for d in doctors],
+        data=[DoctorResponse.model_validate(d) for d in doctors],
         pagination=PaginationMeta.from_total(total, page, page_size),
     )
 

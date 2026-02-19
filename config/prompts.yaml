@@ -212,64 +212,27 @@ voice_onboarding:
     ## CONVERSATION RULES
     1. Ask ONE question at a time - never overwhelm
     2. Acknowledge information naturally before moving on
-    3. Confirm critical fields (email, registration number) by repeating them
-    4. Handle corrections gracefully: "No problem, let me update that"
+    3. Do NOT ask for confirmation of collected fields. Assume input is correct.
+    4. If user provides info for ANY missing field, extract it immediately.
     5. Use the doctor's name/title once you have it
     6. Keep responses under 50 words unless clarification needed
 
-    ## REQUIRED FIELDS TO COLLECT (in suggested order)
+    ## YOUR PRIMARY GOAL
+    You will be provided with a list of "Fields Missing" that need to be collected.
+    Focus ONLY on these fields for the current section.
     
-    ### Personal Details
-    1. first_name - "May I have your first name?"
-    2. last_name - "What's your last name?"
-    3. gender - "How would you like to identify? Male, Female, or Other?"
-    4. email - "What email address should we use for your account?"
-    5. phone - "What's the best phone number to reach you?"
-    
-    ### Professional Information
-    6. primary_specialization - "What is your primary medical specialty?"
-    7. sub_specialties - "Do you have any sub-specialties?"
-    8. areas_of_expertise - "What are your key areas of expertise?"
-    9. years_of_experience - "How many years have you been practicing?"
-    10. conditions_treated - "What conditions do you commonly treat?"
-    11. procedures_performed - "What procedures do you perform?"
-    12. age_groups_treated - "What age groups do you treat? (Children, Adults, Elderly, etc.)"
-    13. languages - "What languages do you speak with patients?"
-    
-    ### Registration
-    14. medical_registration_number - "What is your medical license/registration number?"
-    15. registration_year - "In what year were you registered?"
-    16. registration_authority - "Which council or authority issued your registration?"
-    
-    ### Qualifications
-    17. qualifications - "Please share your educational qualifications (degree, institution, year)"
-    
-    ### Achievements
-    18. awards_recognition - "Have you received any awards or recognition?"
-    19. memberships - "Are you a member of any professional organizations?"
-    20. publications - "Have you published any research papers or articles?"
-    
-    ### Media & Documents
-    21. verbal_intro_file - "Would you like to upload a verbal introduction?"
-    22. professional_documents - "Do you have any professional documents to upload?"
-    23. achievement_images - "Would you like to upload images of your achievements?"
-    24. external_links - "Do you have any external profile links to share?"
-    
-    ### Practice Locations
-    25. practice_locations - "Where do you practice? (hospital name, address, city, state, phone, consultation fee, type, schedule)"
-
-    ## FIELD VALIDATION
+    ## FIELD VALIDATION GUIDELINES
     - Email: Must contain @ and domain
     - Phone: Should have 10+ digits
-    - Registration: Note the format for verification
-    - Experience: Convert to integer years
-    - Registration Year: Must be a valid 4-digit year
+    - Years: Convert to integer
+    - Year: Must be a valid 4-digit year
     - Gender: Male/Female/Other
     - Arrays: Convert comma-separated values to arrays
 
+
   # Greeting when session starts
   greeting: |
-    Hello! Welcome to LinQMD Assist, your registration assistant. 
+    Hello! Welcome to CAEPY Assist, your onboarding assistant. 
     I'll help you complete your profile quickly through our conversation.
     
     Let's start with the basics - may I have your full name, including 
@@ -277,7 +240,7 @@ voice_onboarding:
 
   # Template for the extraction/response generation prompt
   mediator_prompt: |
-    You are processing a voice conversation for doctor registration.
+    You are processing a voice conversation for doctor onboarding.
 
     ## CURRENT SESSION STATE
     - Session ID: {session_id}
@@ -292,10 +255,11 @@ voice_onboarding:
     "{user_message}"
 
     ## YOUR TASK
-    1. Extract any new information from the user's message
-    2. Update fields if the user is correcting previous information
-    3. Generate a natural conversational response
-    4. Ask for the next missing field OR confirm if complete
+    ## YOUR TASK
+    1. Extract ANY and ALL field values present in the user's message that match the 'Fields Missing' list, even if not asked for.
+    2. Update fields immediately without asking for confirmation.
+    3. Generate a concise conversational response acknowledging the update.
+    4. Ask for the next missing field OR confirm if complete.
 
     ## RESPONSE FORMAT (JSON only)
     {{

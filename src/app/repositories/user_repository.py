@@ -68,14 +68,17 @@ class UserRepository:
         self,
         skip: int = 0,
         limit: int = 100,
-        role: str | None = None,
+        role: str | list[str] | None = None,
         is_active: bool | None = None,
     ) -> Sequence[User]:
         """Get all users with optional filtering."""
         query = select(User)
         
         if role:
-            query = query.where(User.role == role)
+            if isinstance(role, list):
+                query = query.where(User.role.in_(role))
+            else:
+                query = query.where(User.role == role)
         if is_active is not None:
             query = query.where(User.is_active == is_active)
         

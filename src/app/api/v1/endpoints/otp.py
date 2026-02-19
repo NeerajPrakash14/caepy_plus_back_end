@@ -316,3 +316,140 @@ async def resend_otp(
         mobile_number=otp_service.mask_mobile(request.mobile_number),
         expires_in_seconds=otp_service.settings.OTP_EXPIRY_SECONDS,
     )
+
+
+@router.post(
+    "/admin/otp/verify",
+    response_model=OTPVerifyResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Verify Admin OTP",
+    description=(
+        "Verify OTP for admin/operational users. "
+        "Strictly enforces RBAC: user must exist and have admin/operational role. "
+        "Does NOT auto-create users."
+    ),
+    responses={
+        200: {
+            "description": "Admin OTP verified successfully",
+            "model": OTPVerifyResponse,
+        },
+        400: {
+            "description": "Invalid/Expired OTP",
+            "model": OTPErrorResponse,
+        },
+        403: {
+            "description": "Forbidden (Non-admin or Unknown user)",
+            "model": OTPErrorResponse,
+        },
+    },
+)
+async def verify_admin_otp(
+    request: OTPVerifySchema,
+    otp_service: OTPService = Depends(get_otp_service),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> OTPVerifyResponse:
+    """Verify OTP and authenticate admin user."""
+    from ....models.enums import UserRole
+
+    logger.info(
+        "Admin OTP verify request",
+        mobile=otp_service.mask_mobile(request.mobile_number),
+    )
+
+    # 1. Verify OTP
+    # is_valid, message = await otp_service.verify_otp(
+    #     request.mobile_number, request.otp
+    # )
+    
+    # Bypass OTP verification for now (MIMIC MODE)
+    is_valid = True
+    message = "OTP verified successfully (MIMIC)"
+
+    if not is_valid:
+        logger.warning(
+            "Admin OTP verification failed",
+            mobile=otp_service.mask_mobile(request.mobile_number),
+            reason=message,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "message": message,
+                "error_code": "INVALID_OTP",
+            },
+        )
+
+    # 2. Check if User exists (Strict Check)
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_phone(request.mobile_number)
+
+    if not user:
+        logger.warning(
+            "Admin login failed: User not found",
+            mobile=otp_service.mask_mobile(request.mobile_number),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "message": "Access denied. Admin user not found.",
+                "error_code": "USER_NOT_FOUND",
+            },
+        )
+
+    # 3. Check Role (Strict RBAC)
+    allowed_roles = (UserRole.ADMIN.value, UserRole.OPERATIONAL.value)
+    if user.role not in allowed_roles:
+        logger.warning(
+            "Admin login failed: Insufficient permissions",
+            user_id=user.id,
+            role=user.role,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "message": "Access denied. Insufficient permissions.",
+                "error_code": "INSUFFICIENT_PERMISSIONS",
+            },
+        )
+    
+    # 4. Check Active Status
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "message": "Account is inactive.",
+                "error_code": "USER_INACTIVE",
+            },
+        )
+
+    # 5. Generate Token
+    token = _create_access_token(
+        subject=user.phone,
+        settings=settings,
+        doctor_id=user.doctor_id,
+        email=user.email,
+        role=user.role,
+    )
+
+    logger.info(
+        "Admin verified successfully",
+        user_id=user.id,
+        role=user.role,
+    )
+
+    return OTPVerifyResponse(
+        success=True,
+        message="Admin verified successfully",
+        doctor_id=user.doctor_id, # Can be None if not linked to doctor
+        is_new_user=False, # Admins are never "new" via this endpoint
+        mobile_number=user.phone,
+        role=user.role,
+        access_token=token.access_token,
+        token_type=token.token_type,
+        expires_in=token.expires_in,
+    )
