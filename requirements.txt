@@ -30,6 +30,7 @@ psycopg2-binary>=2.9.9
 # Authentication & Security
 # -----------------------------------------------------------------------------
 python-jose[cryptography]>=3.3.0
+firebase-admin>=6.0.0
 
 # -----------------------------------------------------------------------------
 # HTTP Client
@@ -74,7 +75,6 @@ tenacity>=9.1.2
 pytest>=8.3.0
 pytest-asyncio>=0.24.0
 aiosqlite>=0.20.0
-
 
 # Make sure your virtual environment is activated
 # source .venv/bin/activate

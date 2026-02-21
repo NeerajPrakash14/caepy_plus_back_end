@@ -165,3 +165,12 @@ class OTPErrorResponse(BaseModel):
             "error_code": "INVALID_OTP",
         }
     })
+
+
+class GoogleAuthSchema(BaseModel):
+    """Request schema for Google Sign-In authentication."""
+
+    id_token: str = Field(
+        ...,
+        description="Firebase ID token from Google Sign-In popup",
+    )

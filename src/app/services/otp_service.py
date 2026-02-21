@@ -301,6 +301,15 @@ class OTPService:
             Tuple of (success, message)
         """
         try:
+            # Validate credentials before proceeding
+            if not self.settings.SMS_USER_ID or not self.settings.SMS_USER_PASS:
+                logger.error(
+                    "SMS credentials missing",
+                    user_id_set=bool(self.settings.SMS_USER_ID),
+                    user_pass_set=bool(self.settings.SMS_USER_PASS)
+                )
+                return False, "SMS service configuration error. Please check environment variables."
+
             # Initialize store if needed
             store = await self._get_store()
             
@@ -352,11 +361,11 @@ class OTPService:
             )
             
             if response.status_code == 200:
-                # Check if response indicates success
-                response_lower = response_text.lower()
-                if "error" in response_lower or "fail" in response_lower or "invalid" in response_lower:
+                # strictly check for onlysms.co.in success response (starts with 100=)
+                # Success format: 100=Transaction_ID or 100=SuccessMsg
+                if not response_text.startswith("100="):
                     logger.error(
-                        "SMS API returned error in response",
+                        "SMS API returned non-success response",
                         response=response_text
                     )
                     return False, f"SMS API error: {response_text[:100]}"

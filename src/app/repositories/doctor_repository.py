@@ -302,6 +302,48 @@ class DoctorRepository:
         logger.info(f"Created doctor from phone: {doctor.id} ({normalized_phone})")
         
         return doctor
+
+    async def create_from_email(
+        self,
+        email: str,
+        name: str = "",
+        role: str = "user",
+    ) -> Doctor:
+        """
+        Create a new doctor record from email address (Google Sign-In).
+        
+        Used during Google Sign-In when a new user signs up.
+        Creates a minimal record with email and name.
+        The doctor can complete their profile later during onboarding.
+        
+        Args:
+            email: Verified email address from Google
+            name: Display name from Google account
+            role: User role. Defaults to 'user'.
+            
+        Returns:
+            Created doctor entity with ID
+        """
+        # Split name into first/last
+        name_parts = name.strip().split(" ", 1) if name else ["", ""]
+        first_name = name_parts[0] if len(name_parts) > 0 else ""
+        last_name = name_parts[1] if len(name_parts) > 1 else ""
+        
+        doctor = Doctor(
+            email=email.lower(),
+            first_name=first_name,
+            last_name=last_name,
+            phone="",  # Will be filled during onboarding
+            role=role,
+        )
+        
+        self.session.add(doctor)
+        await self.session.commit()
+        await self.session.refresh(doctor)
+        
+        logger.info(f"Created doctor from email: {doctor.id} ({email})")
+        
+        return doctor
     
     async def delete(self, doctor_id: int) -> bool:
         """

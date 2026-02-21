@@ -17,6 +17,7 @@ from src.app.schemas.auth import (
     OTPVerifySchema,
     OTPVerifyResponse,
     OTPErrorResponse,
+    GoogleAuthSchema,
 )
 from src.app.services.otp_service import get_otp_service, OTPService
 from src.app.repositories.doctor_repository import DoctorRepository
@@ -449,6 +450,153 @@ async def verify_admin_otp(
         is_new_user=False, # Admins are never "new" via this endpoint
         mobile_number=user.phone,
         role=user.role,
+        access_token=token.access_token,
+        token_type=token.token_type,
+        expires_in=token.expires_in,
+    )
+
+
+@router.post(
+    "/google/verify",
+    response_model=OTPVerifyResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Google Sign-In",
+    description=(
+        "Verify Firebase ID token from Google Sign-In and authenticate user. "
+        "Creates a new doctor record if the email is not found. "
+        "No OTP step is required."
+    ),
+    responses={
+        200: {
+            "description": "Google Sign-In successful",
+            "model": OTPVerifyResponse,
+        },
+        401: {
+            "description": "Invalid Firebase token",
+            "model": OTPErrorResponse,
+        },
+    },
+)
+async def google_verify(
+    request: GoogleAuthSchema,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> OTPVerifyResponse:
+    """Verify Google Sign-In and authenticate/register user.
+
+    Flow:
+    1. Verify Firebase ID token server-side
+    2. Extract email and name from decoded token
+    3. Find or create doctor record by email
+    4. Find or create user record
+    5. Generate JWT access token
+    6. Return same response shape as /otp/verify
+    """
+    from src.app.core.firebase_config import verify_firebase_token
+
+    logger.info("Google Sign-In verify request received")
+
+    # 1. Verify Firebase ID token
+    try:
+        decoded_token = verify_firebase_token(request.id_token)
+    except ValueError as e:
+        logger.warning("Google Sign-In: invalid token", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "success": False,
+                "message": str(e),
+                "error_code": "INVALID_FIREBASE_TOKEN",
+            },
+        )
+
+    # 2. Extract user info from decoded token
+    google_email = decoded_token.get("email")
+    google_name = decoded_token.get("name", "")
+
+    if not google_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "message": "No email found in Google account.",
+                "error_code": "NO_EMAIL",
+            },
+        )
+
+    logger.info("Google Sign-In: token decoded", email=google_email, name=google_name)
+
+    # 3. Find or create doctor by email
+    doctor_repo = DoctorRepository(db)
+    user_repo = UserRepository(db)
+    doctor = await doctor_repo.get_by_email(google_email)
+
+    is_new_user = doctor is None
+
+    if is_new_user:
+        doctor = await doctor_repo.create_from_email(
+            email=google_email,
+            name=google_name,
+            role="user",
+        )
+        logger.info(
+            "Created new doctor from Google Sign-In",
+            doctor_id=doctor.id,
+            email=google_email,
+        )
+
+    # 4. Get doctor details for JWT
+    doctor_id = doctor.id
+    doctor_phone = doctor.phone if doctor.phone else ""
+
+    # 5. Get or create user record
+    existing_user = await user_repo.get_by_email(google_email)
+    if existing_user:
+        user_role = existing_user.role if existing_user.role else "user"
+    else:
+        user_role = "user"
+        try:
+            await user_repo.create(
+                phone=doctor_phone or "google_user",
+                email=google_email,
+                role=user_role,
+                is_active=True,
+                doctor_id=doctor_id,
+            )
+            logger.info(
+                "Created user record for Google Sign-In",
+                doctor_id=doctor_id,
+                email=google_email,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to create user record (may already exist)",
+                error=str(e),
+            )
+
+    # 6. Create JWT access token
+    token = _create_access_token(
+        subject=google_email,
+        settings=settings,
+        doctor_id=doctor_id,
+        email=google_email,
+        role=user_role,
+    )
+
+    logger.info(
+        "Google Sign-In successful",
+        email=google_email,
+        is_new_user=is_new_user,
+        doctor_id=doctor_id,
+    )
+
+    return OTPVerifyResponse(
+        success=True,
+        message="Google Sign-In successful",
+        doctor_id=doctor_id,
+        is_new_user=is_new_user,
+        mobile_number=doctor_phone,
+        role=user_role,
         access_token=token.access_token,
         token_type=token.token_type,
         expires_in=token.expires_in,
