@@ -446,6 +446,18 @@ class SaveProfilePayload(BaseModel):
     # Block 6: Content Seed (repeatable)
     content_seeds: list[dict[str, Any]] | None = None
 
+    # Credentials / Registration
+    registration_number: str | None = None
+    medical_registration_number: str | None = None
+    registration_year: int | None = None
+    registration_authority: str | None = None
+
+    # Legacy / compatibility fields
+    gender: str | None = None
+    years_of_experience: int | None = None
+    consultation_fee: float | None = None
+    practice_locations: list[dict[str, Any]] | None = None
+
     # Existing fields
     first_name: str | None = None
     last_name: str | None = None
@@ -588,6 +600,47 @@ async def save_profile(
     identity.updated_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(identity)
+
+    # ---- Also upsert doctor_details with detail-level fields ----
+    detail_fields = [
+        # Block 1
+        "full_name", "specialty", "primary_practice_location",
+        "centres_of_practice", "years_of_clinical_experience",
+        "years_post_specialisation",
+        # Block 2
+        "year_of_mbbs", "year_of_specialisation", "fellowships",
+        "qualifications", "professional_memberships", "awards_academic_honours",
+        # Block 3
+        "areas_of_clinical_interest", "practice_segments",
+        "conditions_commonly_treated", "conditions_known_for",
+        "conditions_want_to_treat_more",
+        # Block 4
+        "training_experience", "motivation_in_practice", "unwinding_after_work",
+        "recognition_identity", "quality_time_interests", "quality_time_interests_text",
+        "professional_achievement", "personal_achievement",
+        "professional_aspiration", "personal_aspiration",
+        # Block 5
+        "what_patients_value_most", "approach_to_care", "availability_philosophy",
+        # Block 6
+        "content_seeds",
+        # Registration / legacy
+        "registration_number", "registration_year", "registration_authority",
+        "gender", "years_of_experience", "consultation_fee", "practice_locations",
+    ]
+
+    details_payload: dict[str, Any] = {}
+    for field_name in detail_fields:
+        val = getattr(payload, field_name, None)
+        if val is not None:
+            details_payload[field_name] = val
+
+    # Also accept medical_registration_number as an alias
+    if payload.medical_registration_number and "registration_number" not in details_payload:
+        details_payload["registration_number"] = payload.medical_registration_number
+
+    if details_payload:
+        await repo.upsert_details(doctor_id=doctor_id, payload=details_payload)
+        updated_fields.extend(list(details_payload.keys()))
 
     # Auto-detect and save new dropdown values contributed by this doctor
     new_dropdown_values: dict[str, list[str]] = {}
