@@ -10,6 +10,7 @@ import json
 from collections.abc import AsyncGenerator, Generator
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
 import pytest_asyncio
@@ -31,9 +32,9 @@ def _base64url_encode(data: bytes) -> str:
 
 
 def _create_test_jwt(
-    subject: str = "+1-555-0123",
+    subject: str = "+919999999999",
     doctor_id: int | None = 1,
-    email: str | None = "test@example.com",
+    email: str | None = "admin@example.com",
     role: str = "admin",
     expire_minutes: int = 30,
 ) -> str:
@@ -189,3 +190,85 @@ def sample_update_data() -> dict:
         "phone_number": "+1-555-9999",
         "years_of_experience": 16,
     }
+
+
+@pytest.fixture
+def mock_firebase(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mock Firebase token verification to prevent actual API calls."""
+    def mock_verify_token(token: str) -> dict:
+        return {
+            "uid": "test_firebase_uid",
+            "email": "test@example.com",
+            "name": "Test User",
+            "email_verified": True,
+            "picture": "https://example.com/photo.jpg",
+        }
+    monkeypatch.setattr("src.app.core.firebase_config.verify_firebase_token", mock_verify_token)
+
+
+@pytest.fixture
+def mock_gemini() -> Generator[MagicMock, None, None]:
+    """Mock Gemini service to prevent actual LLM generation calls."""
+    with patch("src.app.services.gemini_service.GeminiService") as mock_cls:
+        mock_instance = mock_cls.return_value
+        mock_instance.generate.return_value = "Mocked generation response"
+        mock_instance.generate_with_retry.return_value = "Mocked retry response"
+        mock_instance.generate_structured.return_value = {"mocked_key": "mocked_value"}
+        mock_instance.generate_with_vision.return_value = {"extracted_text": "Mocked OCR text"}
+        
+        # Patch the singleton getter
+        with patch("src.app.services.gemini_service.get_gemini_service", return_value=mock_instance):
+            yield mock_instance
+
+
+@pytest.fixture
+def mock_blob_storage() -> Generator[MagicMock, None, None]:
+    """Mock Blob Storage service to prevent actual file I/O."""
+    with patch("src.app.services.blob_storage_service.LocalBlobStorageService") as mock_cls:
+        mock_instance = mock_cls.return_value
+        
+        # Setup AsyncMock for async methods
+        mock_instance.upload_from_bytes = AsyncMock(return_value=MagicMock(
+            success=True, 
+            blob_id="mock_blob_123", 
+            file_uri="/api/v1/blobs/mock_blob_123",
+            file_size=1024,
+            mime_type="image/jpeg",
+            content_hash="mockhash",
+            error_message=None
+        ))
+        mock_instance.upload_from_url = AsyncMock(return_value=MagicMock(
+            success=True, 
+            blob_id="mock_blob_from_url_123", 
+            file_uri="/api/v1/blobs/mock_blob_from_url_123",
+            file_size=2048,
+            mime_type="application/pdf",
+            content_hash="mockhash_url",
+            error_message=None
+        ))
+        mock_instance.get_blob = AsyncMock(return_value=(b"mocked bytes", MagicMock(mime_type="image/jpeg")))
+        mock_instance.delete_blob = AsyncMock(return_value=True)
+        mock_instance.get_blob_uri = MagicMock(return_value="/api/v1/blobs/mock_blob_123")
+        mock_instance.blob_exists = AsyncMock(return_value=True)
+        
+        yield mock_instance
+
+@pytest_asyncio.fixture(scope="function", autouse=True)
+async def setup_admin_user(db_session: AsyncSession) -> None:
+    """Ensure an admin user exists for the default auth_headers token."""
+    from src.app.models.user import User
+    from src.app.models.enums import UserRole
+    from sqlalchemy import select
+    
+    result = await db_session.execute(select(User).where(User.phone == "+919999999999"))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        user = User(
+            phone="+919999999999",
+            email="admin@example.com",
+            role=UserRole.ADMIN.value,
+            is_active=True,
+        )
+        db_session.add(user)
+        await db_session.commit()

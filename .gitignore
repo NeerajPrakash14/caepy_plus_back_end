@@ -82,6 +82,8 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
+!.env.example
 .venv
 env/
 venv/
@@ -143,6 +145,7 @@ Desktop.ini
 # Database
 *.db
 *.sqlite3
+*.sql
 
 # Logs
 *.log
@@ -150,3 +153,11 @@ logs/
 
 # Project-specific
 .github/instructions/wmt-copilot.instructions.md
+
+# Blob storage / Uploads
+blob_storage/
+uploads/
+
+# Ruff
+.ruff_cache/
+

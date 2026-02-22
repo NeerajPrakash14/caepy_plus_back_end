@@ -41,6 +41,14 @@ class AllDropdownDataResponse(BaseModel):
         default_factory=list,
         description="Unique specialisation values"
     )
+    sub_specialisations: list[str] = Field(
+        default_factory=list,
+        description="Unique sub-specialisation values"
+    )
+    degrees: list[str] = Field(
+        default_factory=list,
+        description="Unique degree/qualification values"
+    )
 
 # ---------------------------------------------------------------------------
 # Request Schemas
