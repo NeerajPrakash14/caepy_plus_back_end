@@ -56,7 +56,7 @@ async def test_list_testimonials(client: AsyncClient, sample_testimonial: str, a
 @pytest.mark.asyncio
 async def test_list_all_testimonials_admin(client: AsyncClient, sample_testimonial: str, auth_headers: dict[str, str]) -> None:
     """Test admin list API."""
-    response = await client.get("/api/v1/testimonials/admin", headers=auth_headers)
+    response = await client.get("/api/v1/testimonials?include_inactive=true", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()["data"]
     assert len(data["testimonials"]) > 0

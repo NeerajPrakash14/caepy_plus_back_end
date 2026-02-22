@@ -11,7 +11,8 @@ Data sources:
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, status
+from typing import Annotated, Any
+from fastapi import APIRouter, status, Query
 from pydantic import BaseModel, Field
 
 from ....core.responses import GenericResponse
@@ -81,92 +82,46 @@ class DropdownValuesUpdateRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get(
-    "/specialisations",
-    response_model=GenericResponse[DropdownValuesResponse],
-    summary="Get specialisation dropdown values",
+    "",
+    response_model=GenericResponse[DropdownValuesResponse | AllDropdownDataResponse],
+    summary="Get dropdown reference data",
     description="""
-Fetch unique specialisation values from existing doctor data.
+Fetch dropdown values.
 
-**Use case:** Populate specialisation dropdown during doctor onboarding.
-Values are sorted alphabetically.
+If a `type` query parameter is provided (e.g., `specialisations`, `sub_specialisations`, `degrees`), 
+it returns just that type. 
+If no `type` is provided, it returns all dropdown data in a single response (useful for caching).
     """,
 )
-async def get_specialisations(db: DbSession) -> GenericResponse[DropdownValuesResponse]:
-    """Get unique specialisation values for dropdown."""
-
-    repo = OnboardingRepository(db)
-    values = await repo.get_unique_specialities()
-
-    return GenericResponse(
-        message=f"Found {len(values)} specialisation(s)",
-        data=DropdownValuesResponse(values=values, count=len(values)),
-    )
-
-@router.get(
-    "/sub-specialisations",
-    response_model=GenericResponse[DropdownValuesResponse],
-    summary="Get sub-specialisation dropdown values",
-    description="""
-Fetch unique sub-specialisation values from existing doctor data.
-
-**Use case:** Populate sub-specialisation dropdown during doctor onboarding.
-Values are extracted from all doctors' sub_specialities arrays and deduplicated.
-    """,
-)
-async def get_sub_specialisations(db: DbSession) -> GenericResponse[DropdownValuesResponse]:
-    """Get unique sub-specialisation values for dropdown."""
-
-    repo = OnboardingRepository(db)
-    values = await repo.get_unique_sub_specialities()
-
-    return GenericResponse(
-        message=f"Found {len(values)} sub-specialisation(s)",
-        data=DropdownValuesResponse(values=values, count=len(values)),
-    )
-
-@router.get(
-    "/degrees",
-    response_model=GenericResponse[DropdownValuesResponse],
-    summary="Get degree/qualification dropdown values",
-    description="""
-Fetch unique degree values from existing doctor qualifications.
-
-**Use case:** Populate degree dropdown during doctor onboarding.
-Values are extracted from qualifications JSON (degree/name/title field).
-    """,
-)
-async def get_degrees(db: DbSession) -> GenericResponse[DropdownValuesResponse]:
-    """Get unique degree values for dropdown."""
-
-    repo = OnboardingRepository(db)
-    values = await repo.get_unique_degrees()
-
-    return GenericResponse(
-        message=f"Found {len(values)} degree(s)",
-        data=DropdownValuesResponse(values=values, count=len(values)),
-    )
-
-@router.get(
-    "/all",
-    response_model=GenericResponse[AllDropdownDataResponse],
-    summary="Get all dropdown data for onboarding",
-    description="""
-Fetch all dropdown values in a single request for onboarding forms.
-
-**Returns:**
-- specialisations: Unique specialisation values
-- sub_specialisations: Unique sub-specialisation values  
-- degrees: Unique degree/qualification values
-
-**Use case:** Single API call to populate all dropdowns during doctor onboarding.
-Frontend can cache this response and refresh periodically.
-    """,
-)
-async def get_all_dropdown_data(db: DbSession) -> GenericResponse[AllDropdownDataResponse]:
-    """Get all dropdown data in a single request."""
-
+async def get_dropdown_data(
+    dropdown_type: Annotated[str | None, Query(alias="type", description="The specific type of data to fetch (specialisations, sub_specialisations, degrees)")] = None,
+    db: DbSession = None,
+) -> GenericResponse[Any]:
+    """Get reference data for dropdowns."""
     repo = OnboardingRepository(db)
 
+    if dropdown_type == "specialisations":
+        values = await repo.get_unique_specialities()
+        return GenericResponse(
+            message=f"Found {len(values)} specialisation(s)",
+            data=DropdownValuesResponse(values=values, count=len(values)),
+        )
+    elif dropdown_type == "sub_specialisations":
+        values = await repo.get_unique_sub_specialities()
+        return GenericResponse(
+            message=f"Found {len(values)} sub-specialisation(s)",
+            data=DropdownValuesResponse(values=values, count=len(values)),
+        )
+    elif dropdown_type == "degrees":
+        values = await repo.get_unique_degrees()
+        return GenericResponse(
+            message=f"Found {len(values)} degree(s)",
+            data=DropdownValuesResponse(values=values, count=len(values)),
+        )
+    elif dropdown_type is not None:
+        raise BadRequestError(message=f"Unknown dropdown type: {dropdown_type}")
+        
+    # Default to all if no type specifier
     specialisations = await repo.get_unique_specialities()
     sub_specialisations = await repo.get_unique_sub_specialities()
     degrees = await repo.get_unique_degrees()

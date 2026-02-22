@@ -52,7 +52,7 @@ async def test_search_hospitals(client: AsyncClient, sample_hospital: int, auth_
     verify_payload = {"action": "verify", "verified_by": "1"}
     await client.post(f"/api/v1/hospitals/{sample_hospital}/verify", json=verify_payload, headers=auth_headers)
 
-    response = await client.get("/api/v1/hospitals/search?q=Apollo", headers=auth_headers)
+    response = await client.get("/api/v1/hospitals?q=Apollo&autocomplete=true", headers=auth_headers)
     assert response.status_code == 200
     assert len(response.json()["data"]) > 0
     assert response.json()["data"][0]["name"] == "Apollo City Hospital"
@@ -67,7 +67,7 @@ async def test_list_hospitals(client: AsyncClient, sample_hospital: int, auth_he
 @pytest.mark.asyncio
 async def test_list_pending_hospitals(client: AsyncClient, sample_hospital: int, auth_headers: dict[str, str]) -> None:
     """Test list pending hospitals."""
-    response = await client.get("/api/v1/hospitals/admin/pending", headers=auth_headers)
+    response = await client.get("/api/v1/hospitals?verification_status=pending", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()["data"]
     assert any(h["id"] == sample_hospital for h in data) # since it's pending initially
