@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
 import pytest
 
 if TYPE_CHECKING:
@@ -81,7 +82,7 @@ async def test_toggle_testimonial_active(client: AsyncClient, sample_testimonial
     response = await client.post(f"/api/v1/testimonials/{sample_testimonial}/toggle-active", headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["data"]["is_active"] is False # toggled
-    
+
     # Toggle back
     response2 = await client.post(f"/api/v1/testimonials/{sample_testimonial}/toggle-active", headers=auth_headers)
     assert response2.json()["data"]["is_active"] is True
@@ -92,7 +93,7 @@ async def test_delete_testimonial(client: AsyncClient, sample_testimonial: str, 
     response = await client.delete(f"/api/v1/testimonials/{sample_testimonial}", headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["data"]["deleted"] is True
-    
+
     # Verify it's gone
     response2 = await client.get(f"/api/v1/testimonials/{sample_testimonial}", headers=auth_headers)
     assert response2.status_code == 404

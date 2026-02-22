@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase
 
-from ..core.config import get_settings, Settings
+from ..core.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -40,17 +40,17 @@ class DatabaseManager:
     Implements the singleton pattern for connection management
     with async connection pooling.
     """
-    
+
     _engine: AsyncEngine | None = None
     _session_factory: async_sessionmaker[AsyncSession] | None = None
-    
+
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
-    
+
     def _create_engine(self) -> AsyncEngine:
         """Create async SQLAlchemy engine for PostgreSQL."""
         database_url = self.settings.DATABASE_URL
-        
+
         engine = create_async_engine(
             database_url,
             echo=self.settings.DATABASE_ECHO,
@@ -62,16 +62,16 @@ class DatabaseManager:
         logger.info(
             f"Created PostgreSQL engine with pool_size={self.settings.DATABASE_POOL_SIZE}"
         )
-        
+
         return engine
-    
+
     @property
     def engine(self) -> AsyncEngine:
         """Get or create the database engine."""
         if self._engine is None:
             self._engine = self._create_engine()
         return self._engine
-    
+
     @property
     def session_factory(self) -> async_sessionmaker[AsyncSession]:
         """Get or create the session factory."""
@@ -84,19 +84,19 @@ class DatabaseManager:
                 autocommit=False,
             )
         return self._session_factory
-    
+
     async def create_tables(self) -> None:
         """Create all tables defined in models."""
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         logger.info("Database tables created")
-    
+
     async def drop_tables(self) -> None:
         """Drop all tables (use with caution!)."""
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
         logger.warning("Database tables dropped")
-    
+
     async def close(self) -> None:
         """Close database connections."""
         if self._engine is not None:
@@ -104,7 +104,7 @@ class DatabaseManager:
             self._engine = None
             self._session_factory = None
             logger.info("Database connections closed")
-    
+
     async def health_check(self) -> dict:
         """Check database health."""
         from sqlalchemy import text
@@ -115,7 +115,7 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Database health check failed: {e}")
             return {"status": "unhealthy", "error": str(e)}
-    
+
     @asynccontextmanager
     async def session(self) -> AsyncGenerator[AsyncSession, None]:
         """

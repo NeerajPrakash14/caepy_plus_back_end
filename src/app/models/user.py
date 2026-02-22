@@ -18,10 +18,10 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     func,
-    Index,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -59,12 +59,12 @@ class User(Base):
         - A user with is_active=False cannot access any endpoints
         - The phone field is the primary identifier (matches JWT sub)
     """
-    
+
     __tablename__ = "users"
-    
+
     # Primary key
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    
+
     # Identification
     phone: Mapped[str] = mapped_column(
         String(20),
@@ -80,7 +80,7 @@ class User(Base):
         index=True,
         comment="Optional email address"
     )
-    
+
     # Authorization
     role: Mapped[str] = mapped_column(
         String(20),
@@ -96,7 +96,7 @@ class User(Base):
         index=True,
         comment="Active status - inactive users cannot authenticate"
     )
-    
+
     # Link to doctor (optional - not all users are doctors)
     doctor_id: Mapped[int | None] = mapped_column(
         Integer,
@@ -105,7 +105,7 @@ class User(Base):
         index=True,
         comment="Optional link to doctor record"
     )
-    
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -122,33 +122,33 @@ class User(Base):
         nullable=True,
         comment="Last successful authentication timestamp"
     )
-    
+
     # Relationship to Doctor
-    doctor: Mapped["Doctor | None"] = relationship(
+    doctor: Mapped[Doctor | None] = relationship(
         "Doctor",
         back_populates="user",
         lazy="selectin",
     )
-    
+
     # Indexes for common queries
     __table_args__ = (
         Index("ix_users_role_active", "role", "is_active"),
         Index("ix_users_phone_active", "phone", "is_active"),
     )
-    
+
     def __repr__(self) -> str:
         return f"<User(id={self.id}, phone='{self.phone}', role='{self.role}', active={self.is_active})>"
-    
+
     @property
     def is_admin(self) -> bool:
         """Check if user has admin role."""
         return self.role == UserRole.ADMIN.value and self.is_active
-    
+
     @property
     def is_operational(self) -> bool:
         """Check if user has operational role."""
         return self.role == UserRole.OPERATIONAL.value and self.is_active
-    
+
     @property
     def can_access_admin(self) -> bool:
         """Check if user can access admin endpoints."""

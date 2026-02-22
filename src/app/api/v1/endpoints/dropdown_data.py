@@ -26,7 +26,7 @@ router = APIRouter(prefix="/dropdown-data", tags=["Dropdown Data"])
 
 class DropdownValuesResponse(BaseModel):
     """Response containing list of dropdown values."""
-    
+
     values: list[str] = Field(
         description="List of unique values for the dropdown"
     )
@@ -36,7 +36,7 @@ class DropdownValuesResponse(BaseModel):
 
 class AllDropdownDataResponse(BaseModel):
     """Response containing all dropdown data for onboarding forms."""
-    
+
     specialisations: list[str] = Field(
         default_factory=list,
         description="Unique specialisation values"
@@ -93,10 +93,10 @@ Values are sorted alphabetically.
 )
 async def get_specialisations(db: DbSession) -> GenericResponse[DropdownValuesResponse]:
     """Get unique specialisation values for dropdown."""
-    
+
     repo = OnboardingRepository(db)
     values = await repo.get_unique_specialities()
-    
+
     return GenericResponse(
         message=f"Found {len(values)} specialisation(s)",
         data=DropdownValuesResponse(values=values, count=len(values)),
@@ -115,10 +115,10 @@ Values are extracted from all doctors' sub_specialities arrays and deduplicated.
 )
 async def get_sub_specialisations(db: DbSession) -> GenericResponse[DropdownValuesResponse]:
     """Get unique sub-specialisation values for dropdown."""
-    
+
     repo = OnboardingRepository(db)
     values = await repo.get_unique_sub_specialities()
-    
+
     return GenericResponse(
         message=f"Found {len(values)} sub-specialisation(s)",
         data=DropdownValuesResponse(values=values, count=len(values)),
@@ -137,10 +137,10 @@ Values are extracted from qualifications JSON (degree/name/title field).
 )
 async def get_degrees(db: DbSession) -> GenericResponse[DropdownValuesResponse]:
     """Get unique degree values for dropdown."""
-    
+
     repo = OnboardingRepository(db)
     values = await repo.get_unique_degrees()
-    
+
     return GenericResponse(
         message=f"Found {len(values)} degree(s)",
         data=DropdownValuesResponse(values=values, count=len(values)),
@@ -164,13 +164,13 @@ Frontend can cache this response and refresh periodically.
 )
 async def get_all_dropdown_data(db: DbSession) -> GenericResponse[AllDropdownDataResponse]:
     """Get all dropdown data in a single request."""
-    
+
     repo = OnboardingRepository(db)
-    
+
     specialisations = await repo.get_unique_specialities()
     sub_specialisations = await repo.get_unique_sub_specialities()
     degrees = await repo.get_unique_degrees()
-    
+
     return GenericResponse(
         message="Dropdown data retrieved successfully",
         data=AllDropdownDataResponse(

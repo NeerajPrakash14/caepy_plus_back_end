@@ -20,15 +20,14 @@ from typing import Any
 
 import httpx
 from tenacity import (
+    before_sleep_log,
     retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
-    before_sleep_log,
 )
 
 from ..core.config import get_settings
-from ..core.exceptions import ExternalServiceError
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +35,14 @@ logger = logging.getLogger(__name__)
 @dataclass
 class LinQMDUserPayload:
     """Data structure for LinQMD user creation API payload."""
-    
+
     # Required fields
     name: str  # Username for login
     mail: str  # Email address
     password: str  # User password
     fullname: str  # Display name
     phone_number: str
-    
+
     # Professional info
     degree: str = ""  # Qualification/degree
     speciality: str = ""  # Primary specialization
@@ -51,16 +50,16 @@ class LinQMDUserPayload:
     specialities_long: str = ""  # Detailed specialities
     expertise_summary: str = ""  # Summary of expertise
     education_details: str = ""  # Education details
-    
+
     # Arrays of expertise items
     expertises: list[dict[str, str]] = field(default_factory=list)
-    
+
     # YouTube videos
     youtube_videos: list[dict[str, str]] = field(default_factory=list)
-    
+
     # Display picture (optional file path or bytes)
     display_picture_path: str | None = None
-    
+
     def to_form_data(self) -> dict[str, str]:
         """
         Convert to urlencoded data format expected by LinQMD API.
@@ -78,7 +77,7 @@ class LinQMDUserPayload:
             'mail': self.mail,
             'pass': self.password,
         }
-        
+
         # Optional fields - only include if they have values
         optional_fields = {
             'fullname': self.fullname,
@@ -90,19 +89,19 @@ class LinQMDUserPayload:
             'expertise_summary': self.expertise_summary,
             'education_details': self.education_details,
         }
-        
+
         # Add non-empty optional fields
         for key, value in optional_fields.items():
             if value:
                 payload[key] = value
-        
+
         return payload
 
 
 @dataclass
 class LinQMDSyncResult:
     """Result of a LinQMD sync operation."""
-    
+
     success: bool
     doctor_id: int
     linqmd_response: dict[str, Any] | None = None
@@ -121,17 +120,17 @@ class LinQMDSyncService:
         service = get_linqmd_sync_service()
         result = await service.sync_doctor(doctor_identity, doctor_details)
     """
-    
+
     def __init__(self) -> None:
         """Initialize the sync service with configuration."""
         self.settings = get_settings()
         self._client: httpx.AsyncClient | None = None
-    
+
     @property
     def is_enabled(self) -> bool:
         """Check if LinQMD sync is enabled."""
         return self.settings.LINQMD_SYNC_ENABLED
-    
+
     @property
     def client(self) -> httpx.AsyncClient:
         """Get or create the HTTP client."""
@@ -141,28 +140,28 @@ class LinQMDSyncService:
                 follow_redirects=True,
             )
         return self._client
-    
+
     async def close(self) -> None:
         """Close the HTTP client."""
         if self._client is not None:
             await self._client.aclose()
             self._client = None
-    
+
     def _get_headers(self) -> dict[str, str]:
         """Build request headers for LinQMD API."""
         headers = {
             'Content-Type': 'application/x-www-form-urlencoded',
         }
-        
+
         # Auth token already includes "Basic " prefix from config
         if self.settings.LINQMD_AUTH_TOKEN:
             headers['Authorization'] = self.settings.LINQMD_AUTH_TOKEN
-        
+
         if self.settings.LINQMD_COOKIE:
             headers['Cookie'] = self.settings.LINQMD_COOKIE
-        
+
         return headers
-    
+
 
     def _generate_username(self, email: str, first_name: str, last_name: str) -> str:
         """
@@ -177,15 +176,15 @@ class LinQMDSyncService:
             username = ''.join(c for c in username if c.isalnum() or c in '._-')
             if len(username) >= 3:
                 return username
-        
+
         # Fallback to name-based
         name_base = f"{first_name}{last_name}".lower()
         name_base = ''.join(c for c in name_base if c.isalnum())
-        
+
         # Add random suffix to avoid collisions
         suffix = ''.join(secrets.choice(string.digits) for _ in range(4))
         return f"{name_base}{suffix}"
-    
+
     def _generate_password(self) -> str:
         """
         Generate a secure temporary password.
@@ -195,11 +194,11 @@ class LinQMDSyncService:
         """
         if self.settings.LINQMD_DEFAULT_PASSWORD:
             return self.settings.LINQMD_DEFAULT_PASSWORD
-        
+
         # Generate secure random password
         alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
         return ''.join(secrets.choice(alphabet) for _ in range(16))
-    
+
     def transform_doctor_data(
         self,
         identity: dict[str, Any],
@@ -219,12 +218,12 @@ class LinQMDSyncService:
         """
         details = details or {}
         media = media or []
-        
+
         # Build full name
         title = identity.get('title', '') or ''
         first_name = identity.get('first_name', '')
         last_name = identity.get('last_name', '')
-        
+
         if title:
             title_display = title.replace('_', '.').title()
             if not title_display.endswith('.'):
@@ -232,14 +231,14 @@ class LinQMDSyncService:
             fullname = f"{title_display} {first_name} {last_name}".strip()
         else:
             fullname = f"{first_name} {last_name}".strip()
-        
+
         # Generate username
         username = self._generate_username(
             identity.get('email', ''),
             first_name,
             last_name
         )
-        
+
         # Format qualifications as degree string
         qualifications = details.get('qualifications', []) or []
         degree_parts = []
@@ -249,7 +248,7 @@ class LinQMDSyncService:
                 if deg:
                     degree_parts.append(deg)
         degree = ', '.join(degree_parts) if degree_parts else ''
-        
+
         # Format education details
         education_lines = []
         for qual in qualifications:
@@ -265,12 +264,12 @@ class LinQMDSyncService:
                         line += f" ({year})"
                     education_lines.append(line)
         education_details = '\n'.join(education_lines)
-        
+
         # Format specialities
         speciality = details.get('speciality', '') or ''
         sub_specialities = details.get('sub_specialities', []) or []
         specialities_long = ', '.join([speciality] + sub_specialities) if sub_specialities else speciality
-        
+
         # Build expertises array from areas_of_expertise
         expertises = []
         areas = details.get('areas_of_expertise', []) or []
@@ -280,7 +279,7 @@ class LinQMDSyncService:
                     'head': area,
                     'content': f"Expert in {area}"  # Basic content
                 })
-        
+
         # Add conditions treated as expertises
         conditions = details.get('conditions_treated', []) or []
         for condition in conditions[:5]:  # Limit to 5
@@ -289,7 +288,7 @@ class LinQMDSyncService:
                     'head': f"Treatment: {condition}",
                     'content': f"Specialized treatment for {condition}"
                 })
-        
+
         # Build expertise summary
         procedures = details.get('procedures_performed', []) or []
         expertise_parts = []
@@ -298,17 +297,17 @@ class LinQMDSyncService:
         if procedures:
             expertise_parts.append(f"Procedures: {', '.join(procedures[:5])}")
         expertise_summary = '\n'.join(expertise_parts)
-        
+
         # Get overview/about text
         overview = details.get('professional_overview', '') or details.get('about_me', '') or ''
-        
+
         # Find display picture from media
         display_picture = None
         for m in media:
             if m.get('media_category') == 'profile_photo' or m.get('is_primary'):
                 display_picture = m.get('file_uri')
                 break
-        
+
         # Build YouTube videos (if external_links contains YouTube)
         youtube_videos = []
         external_links = details.get('external_links', {}) or {}
@@ -320,7 +319,7 @@ class LinQMDSyncService:
                         'videodescription': '',
                         'videoembed_code': value,
                     })
-        
+
         return LinQMDUserPayload(
             name=username,
             mail=identity.get('email', ''),
@@ -337,7 +336,7 @@ class LinQMDSyncService:
             youtube_videos=youtube_videos,
             display_picture_path=display_picture,
         )
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),
@@ -360,26 +359,26 @@ class LinQMDSyncService:
         """
         form_data = payload.to_form_data()
         headers = self._get_headers()
-        
+
         logger.info(f"Sending user to LinQMD: {payload.mail}")
         logger.debug(f"LinQMD API URL: {self.settings.LINQMD_API_URL}")
         logger.debug(f"Request data: {form_data}")
-        
+
         response = await self.client.post(
             self.settings.LINQMD_API_URL,
             data=form_data,
             headers=headers,
         )
-        
+
         logger.info(f"LinQMD response: status={response.status_code}")
-        
+
         try:
             response_json = response.json()
         except Exception:
             response_json = {"raw_response": response.text[:500]}
-        
+
         return response.status_code, response_json
-    
+
     async def sync_doctor(
         self,
         identity: dict[str, Any],
@@ -400,7 +399,7 @@ class LinQMDSyncService:
             LinQMDSyncResult with success status and details
         """
         doctor_id = doctor_id or identity.get('doctor_id', 0)
-        
+
         if not self.is_enabled:
             logger.warning("LinQMD sync is disabled. Skipping sync.")
             return LinQMDSyncResult(
@@ -408,22 +407,22 @@ class LinQMDSyncService:
                 doctor_id=doctor_id,
                 error_message="LinQMD sync is disabled in configuration",
             )
-        
+
         try:
             # Transform data to LinQMD format
             payload = self.transform_doctor_data(identity, details, media)
-            
+
             # Send to LinQMD
             status_code, response_json = await self._send_to_linqmd(payload)
-            
+
             # Check for success (2xx status codes)
             success = 200 <= status_code < 300
-            
+
             if success:
                 logger.info(f"Successfully synced doctor {doctor_id} to LinQMD")
             else:
                 logger.error(f"Failed to sync doctor {doctor_id} to LinQMD: {response_json}")
-            
+
             return LinQMDSyncResult(
                 success=success,
                 doctor_id=doctor_id,
@@ -431,7 +430,7 @@ class LinQMDSyncService:
                 http_status_code=status_code,
                 error_message=None if success else f"API returned status {status_code}",
             )
-            
+
         except httpx.TimeoutException as e:
             logger.error(f"Timeout syncing doctor {doctor_id} to LinQMD: {e}")
             return LinQMDSyncResult(
@@ -453,7 +452,7 @@ class LinQMDSyncService:
                 doctor_id=doctor_id,
                 error_message=f"Unexpected error: {str(e)}",
             )
-    
+
     async def sync_doctor_by_id(
         self,
         doctor_id: int,
@@ -472,9 +471,9 @@ class LinQMDSyncService:
             LinQMDSyncResult
         """
         from ..repositories.onboarding_repository import OnboardingRepository
-        
+
         repo = OnboardingRepository(db_session)
-        
+
         # Fetch doctor data
         identity = await repo.get_identity_by_doctor_id(doctor_id)
         if not identity:
@@ -483,10 +482,10 @@ class LinQMDSyncService:
                 doctor_id=doctor_id,
                 error_message=f"Doctor with ID {doctor_id} not found",
             )
-        
+
         details = await repo.get_details_by_doctor_id(doctor_id)
         media = await repo.get_media_by_doctor_id(doctor_id)
-        
+
         # Convert ORM objects to dicts
         identity_dict = {
             'doctor_id': identity.doctor_id,
@@ -496,7 +495,7 @@ class LinQMDSyncService:
             'email': identity.email,
             'phone_number': identity.phone_number,
         }
-        
+
         details_dict = None
         if details:
             details_dict = {
@@ -511,7 +510,7 @@ class LinQMDSyncService:
                 'procedures_performed': details.procedures_performed,
                 'external_links': details.external_links,
             }
-        
+
         media_list = []
         for m in media:
             media_list.append({
@@ -519,7 +518,7 @@ class LinQMDSyncService:
                 'file_uri': m.file_uri,
                 'is_primary': m.is_primary,
             })
-        
+
         return await self.sync_doctor(identity_dict, details_dict, media_list, doctor_id)
 
 

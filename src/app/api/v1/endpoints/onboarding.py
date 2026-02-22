@@ -5,21 +5,21 @@ Unified onboarding API for resume extraction and voice registration.
 Demonstrates the clean architecture with service layer abstraction.
 """
 import logging
-from datetime import datetime, UTC
-from typing import Annotated, Any, List
+from datetime import UTC, datetime
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, EmailStr
 
-from ....core.config import get_settings, Settings
+from ....core.config import Settings, get_settings
 from ....core.exceptions import (
-    ExtractionError,
     FileValidationError,
     OnboardingProfileAlreadyExistsError,
 )
-from ....core.prompts import get_prompt_manager, PROFILE_SECTIONS
+from ....core.prompts import PROFILE_SECTIONS, get_prompt_manager
 from ....core.responses import GenericResponse
 from ....db.session import DbSession
+from ....models.onboarding import OnboardingStatus
 from ....repositories.onboarding_repository import OnboardingRepository
 from ....schemas.doctor import (
     ExtractionResponse,
@@ -28,23 +28,22 @@ from ....schemas.doctor import (
     ProfileSessionStatsResponse,
     ResumeExtractedData,
 )
-from ....services.extraction_service import get_extraction_service
-from ....services.gemini_service import get_gemini_service
 from ....services.blob_storage_service import (
-    get_blob_storage_service,
     BlobDownloadError,
     BlobUploadError,
+    get_blob_storage_service,
 )
-from ....services.prompt_session_service import get_prompt_session_service
+from ....services.extraction_service import get_extraction_service
+from ....services.gemini_service import get_gemini_service
 from ....services.linqmd_sync_service import get_linqmd_sync_service
-
-from ....models.onboarding import OnboardingStatus
+from ....services.prompt_session_service import get_prompt_session_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/onboarding")
 
 from ....core.rbac import AdminOrOperationalUser
+
 
 def get_extraction_svc():
     """Dependency to get extraction service."""
@@ -64,7 +63,7 @@ def validate_file(
         raise FileValidationError(
             message="Filename is required",
         )
-    
+
     # Check extension
     extension = file.filename.lower().rsplit(".", 1)[-1]
     if extension not in settings.allowed_extensions_list:
@@ -73,7 +72,7 @@ def validate_file(
             filename=file.filename,
             allowed_types=settings.allowed_extensions_list,
         )
-    
+
     # Check content type
     valid_content_types = [
         "application/pdf",
@@ -142,25 +141,25 @@ async def extract_resume(
     """
     # Validate file
     validate_file(file, settings)
-    
+
     # Read file content
     content = await file.read()
-    
+
     # Check file size
     if len(content) > settings.max_file_size_bytes:
         raise FileValidationError(
             message=f"File too large. Maximum size: {settings.MAX_FILE_SIZE_MB}MB",
             filename=file.filename,
         )
-    
+
     logger.info(f"Processing resume: {file.filename} ({len(content)} bytes)")
-    
+
     # Extract data
     extracted_data, processing_time = await extraction_service.extract_from_file(
         file_content=content,
         filename=file.filename or "unknown",
     )
-    
+
     return ExtractionResponse(
         success=True,
         message="Resume parsed successfully",
@@ -193,10 +192,10 @@ async def generate_profile_content(
     prompt_manager = get_prompt_manager()
     gemini = get_gemini_service()
     session_service = get_prompt_session_service()
-    
+
     # Determine which sections to generate
     sections_to_generate = data.sections or PROFILE_SECTIONS
-    
+
     # Validate section names
     invalid_sections = [s for s in sections_to_generate if s not in PROFILE_SECTIONS]
     if invalid_sections:
@@ -204,25 +203,25 @@ async def generate_profile_content(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid sections: {invalid_sections}. Valid sections: {PROFILE_SECTIONS}",
         )
-    
+
     # Get doctor identifier for session tracking
     # Fall back to email or generate a temporary ID
     doctor_id = (
-        data.doctor_identifier 
+        data.doctor_identifier
         or getattr(data.personal_details, 'email', None) if hasattr(data, 'personal_details') else None
         or "anonymous"
     )
-    
+
     # Get next variant for each section
     variant_indices = {}
     for section in sections_to_generate:
         variant_count = prompt_manager.get_variant_count(section)
         variant_idx = await session_service.get_next_variant(doctor_id, section, variant_count)
         variant_indices[section] = variant_idx
-    
+
     # Build doctor payload (exclude session-tracking fields)
     doctor_payload = data.model_dump(exclude={"doctor_identifier", "sections"})
-    
+
     # Generate prompt with variant-specific instructions
     prompt = prompt_manager.get_profile_generation_prompt_with_variants(
         doctor_payload, variant_indices
@@ -239,12 +238,12 @@ async def generate_profile_content(
 
     # Add variant tracking to response (1-indexed for display)
     variants_used = {k: v + 1 for k, v in variant_indices.items()}
-    
+
     profile = ProfileContentResponse(
         **result,
         variants_used=variants_used,
     )
-    
+
     logger.info(f"Generated profile content for {doctor_id} with variants: {variants_used}")
 
     return GenericResponse(
@@ -263,26 +262,26 @@ async def get_profile_session_stats(
 ) -> GenericResponse[ProfileSessionStatsResponse]:
     """Get session statistics showing variant usage for a doctor."""
     session_service = get_prompt_session_service()
-    
+
     stats = await session_service.get_session_stats(doctor_identifier)
-    
+
     if not stats:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No session found for doctor: {doctor_identifier}",
         )
-    
+
     total_regenerations = sum(
         len(section_data.get("used_variants", []))
         for section_data in stats.get("sections", {}).values()
     )
-    
+
     response = ProfileSessionStatsResponse(
         doctor_identifier=stats["doctor_identifier"],
         sections=stats["sections"],
         total_regenerations=total_regenerations,
     )
-    
+
     return GenericResponse(
         message="Session statistics retrieved",
         data=response,
@@ -299,9 +298,9 @@ async def clear_profile_session(
 ) -> GenericResponse[dict]:
     """Clear a doctor's profile generation session to reset variant tracking."""
     session_service = get_prompt_session_service()
-    
+
     cleared = await session_service.clear_session(doctor_identifier)
-    
+
     return GenericResponse(
         message="Session cleared successfully" if cleared else "No session found to clear",
         data={"cleared": cleared, "doctor_identifier": doctor_identifier},
@@ -317,7 +316,7 @@ async def list_profile_variants() -> GenericResponse[dict]:
     """List all available prompt variants for each profile section."""
     prompt_manager = get_prompt_manager()
     variants = prompt_manager.get_all_variant_info()
-    
+
     return GenericResponse(
         message="Available prompt variants",
         data={
@@ -343,7 +342,7 @@ async def validate_extracted_data(
     """
     missing_fields = []
     warnings = []
-    
+
     # Check required fields
     if not data.personal_details.first_name:
         missing_fields.append("first_name")
@@ -355,15 +354,15 @@ async def validate_extracted_data(
         missing_fields.append("primary_specialization")
     if not data.registration.medical_registration_number:
         missing_fields.append("medical_registration_number")
-    
+
     # Warnings for optional but recommended fields
     if not data.personal_details.phone:
         warnings.append("phone_number is recommended")
     if not data.qualifications:
         warnings.append("qualifications are recommended")
-    
+
     is_valid = len(missing_fields) == 0
-    
+
     return GenericResponse(
         message="Validation complete" if is_valid else "Validation failed",
         data={
@@ -470,7 +469,7 @@ class UploadItem(BaseModel):
     file: str
 
 class UploadsPayload(BaseModel):
-    uploads: List[UploadItem]
+    uploads: list[UploadItem]
 
 @router.post(
     "/createprofile",
@@ -550,7 +549,7 @@ async def save_profile(
     db: DbSession,
 ) -> GenericResponse[dict]:
     from ....services.dropdown_option_service import DropdownOptionService
-    
+
     repo = OnboardingRepository(db)
 
     identity = await repo.get_identity_by_doctor_id(doctor_id)
@@ -1056,34 +1055,34 @@ async def sync_doctor_to_linqmd(
     """
     settings = get_settings()
     sync_service = get_linqmd_sync_service()
-    
+
     # Check if sync is enabled
     if not sync_service.is_enabled:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="LinQMD sync is disabled. Set LINQMD_SYNC_ENABLED=true to enable.",
         )
-    
+
     # Verify doctor exists
     repo = OnboardingRepository(db)
     identity = await repo.get_identity_by_doctor_id(doctor_id)
-    
+
     if identity is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Doctor with ID {doctor_id} not found",
         )
-    
+
     # Check if doctor is verified (optional - you may want to allow any status)
     # if identity.onboarding_status != OnboardingStatus.VERIFIED:
     #     raise HTTPException(
     #         status_code=status.HTTP_400_BAD_REQUEST,
     #         detail=f"Doctor must be verified before syncing. Current status: {identity.onboarding_status.value}",
     #     )
-    
+
     # Perform sync
     result = await sync_service.sync_doctor_by_id(doctor_id, db)
-    
+
     response = LinQMDSyncResponse(
         success=result.success,
         doctor_id=result.doctor_id,
@@ -1091,7 +1090,7 @@ async def sync_doctor_to_linqmd(
         error_message=result.error_message,
         http_status_code=result.http_status_code,
     )
-    
+
     if result.success:
         return GenericResponse(
             message="Doctor profile synced to LinQMD successfully",
@@ -1114,8 +1113,8 @@ async def get_linqmd_sync_status() -> GenericResponse[dict]:
     """Check LinQMD sync configuration status."""
     settings = get_settings()
     sync_service = get_linqmd_sync_service()
-    
-    
+
+
     return GenericResponse(
         message="LinQMD sync configuration",
         data={
@@ -1148,34 +1147,34 @@ async def sync_doctors_to_linqmd_bulk(
     """
     settings = get_settings()
     sync_service = get_linqmd_sync_service()
-    
+
     if not sync_service.is_enabled:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="LinQMD sync is disabled. Set LINQMD_SYNC_ENABLED=true to enable.",
         )
-    
+
     results = {
         "total": len(request.doctor_ids),
         "successful": 0,
         "failed": 0,
         "details": [],
     }
-    
+
     for doctor_id in request.doctor_ids:
         result = await sync_service.sync_doctor_by_id(doctor_id, db)
-        
+
         if result.success:
             results["successful"] += 1
         else:
             results["failed"] += 1
-        
+
         results["details"].append({
             "doctor_id": doctor_id,
             "success": result.success,
             "error": result.error_message,
         })
-    
+
     return GenericResponse(
         message=f"Bulk sync complete: {results['successful']}/{results['total']} successful",
         data=results,

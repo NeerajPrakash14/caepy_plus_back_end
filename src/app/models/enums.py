@@ -16,7 +16,7 @@ class UserRole(str, Enum):
     ADMIN = "admin"
     OPERATIONAL = "operational"
     USER = "user"
-    
+
     @classmethod
     def default(cls) -> "UserRole":
         """Return the default role for new users."""

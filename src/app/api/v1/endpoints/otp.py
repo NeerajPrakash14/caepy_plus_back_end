@@ -5,23 +5,24 @@ Provides endpoints for:
 - POST /auth/otp/verify - Verify OTP and login
 """
 
-from fastapi import APIRouter, HTTPException, status, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.core.config import Settings, get_settings
 from src.app.db.session import get_db
-from src.app.schemas.auth import (
-    OTPRequestSchema,
-    OTPRequestResponse,
-    OTPVerifySchema,
-    OTPVerifyResponse,
-    OTPErrorResponse,
-    GoogleAuthSchema,
-)
-from src.app.services.otp_service import get_otp_service, OTPService
 from src.app.repositories.doctor_repository import DoctorRepository
 from src.app.repositories.user_repository import UserRepository
+from src.app.schemas.auth import (
+    GoogleAuthSchema,
+    OTPErrorResponse,
+    OTPRequestResponse,
+    OTPRequestSchema,
+    OTPVerifyResponse,
+    OTPVerifySchema,
+)
+from src.app.services.otp_service import OTPService, get_otp_service
+
 from .auth import _create_access_token
 
 logger = structlog.get_logger(__name__)
@@ -181,7 +182,7 @@ async def verify_otp(
     doctor = await doctor_repo.get_by_phone_number(request.mobile_number)
 
     is_new_user = doctor is None
-    
+
     if is_new_user:
         # Create new doctor record with phone number and default role
         doctor = await doctor_repo.create_from_phone(
@@ -193,7 +194,7 @@ async def verify_otp(
             doctor_id=doctor.id,
             mobile=otp_service.mask_mobile(request.mobile_number),
         )
-    
+
     # Get doctor details for JWT claims
     doctor_id = doctor.id
     doctor_email = doctor.email if doctor.email else None
@@ -362,7 +363,7 @@ async def verify_admin_otp(
     # is_valid, message = await otp_service.verify_otp(
     #     request.mobile_number, request.otp
     # )
-    
+
     # Bypass OTP verification for now (MIMIC MODE)
     is_valid = True
     message = "OTP verified successfully (MIMIC)"
@@ -416,7 +417,7 @@ async def verify_admin_otp(
                 "error_code": "INSUFFICIENT_PERMISSIONS",
             },
         )
-    
+
     # 4. Check Active Status
     if not user.is_active:
         raise HTTPException(

@@ -12,9 +12,9 @@ They are intended for internal/admin use, not public-facing flows.
 from __future__ import annotations
 
 import logging
-from typing import Sequence
+from collections.abc import Sequence
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status, Request
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, EmailStr
 
 from ....core.responses import PaginatedResponse, PaginationMeta
@@ -251,7 +251,7 @@ def _build_identity_from_doctor(doctor) -> DoctorIdentityResponse:
     and has no matching `doctor_identity` row, this helper synthesises an
     equivalent response so the admin endpoints can return consistent data.
     """
-    from datetime import datetime, UTC
+    from datetime import UTC, datetime
 
     return DoctorIdentityResponse(
         id=str(doctor.id),
@@ -352,7 +352,7 @@ async def list_doctors_with_filter(
     doctor_repo = DoctorRepository(db)
 
     skip = (page - 1) * page_size
-    
+
     if status is not None:
         # When filtering by status, use the onboarding identity table
         identities = await repo.list_identities(

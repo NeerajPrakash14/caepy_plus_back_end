@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock
 
 if TYPE_CHECKING:
     from httpx import AsyncClient
 
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.app.models.doctor import Doctor
 
 
@@ -123,11 +125,11 @@ async def test_extract_resume(client: AsyncClient, auth_headers: dict[str, str])
         mock_extract.return_value = ({
             "personal_details": {"first_name": "John", "last_name": "Doe"}
         }, 123.4)
-        
+
         # FastAPI UploadFile expects form-data
         files = {"file": ("resume.pdf", b"dummy content", "application/pdf")}
         response = await client.post("/api/v1/onboarding/extract-resume", files=files, headers=auth_headers)
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
@@ -145,10 +147,10 @@ async def test_generate_profile_content(client: AsyncClient, auth_headers: dict[
         "medical_registration_number": "MED123",
         "sections": ["professional_overview"]
     }
-    
+
     with patch("src.app.services.gemini_service.GeminiService.generate_structured", new_callable=AsyncMock) as mock_gen:
         mock_gen.return_value = {"professional_overview": "Generated overview string"}
-        
+
         response = await client.post("/api/v1/onboarding/generate-profile-content", json=payload, headers=auth_headers)
         assert response.status_code == 200
         data = response.json()["data"]
@@ -173,14 +175,14 @@ async def test_profile_session_stats(client: AsyncClient, auth_headers: dict[str
         mock_gen.return_value = {"professional_overview": "A generated overview"}
         mock_stats.return_value = {"doctor_identifier": "test_session_doc", "sections": {"professional_overview": {"used_variants": [0]}}}
         mock_clear.return_value = True
-        
+
         await client.post("/api/v1/onboarding/generate-profile-content", json=payload, headers=auth_headers)
-    
+
         # Get stats
         response = await client.get("/api/v1/onboarding/profile-session/test_session_doc", headers=auth_headers)
         assert response.status_code == 200
         assert response.json()["data"]["doctor_identifier"] == "test_session_doc"
-        
+
         # Clear session
         clear_resp = await client.delete("/api/v1/onboarding/profile-session/test_session_doc", headers=auth_headers)
         assert clear_resp.status_code == 200

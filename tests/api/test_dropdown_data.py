@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
 import pytest
 
 if TYPE_CHECKING:
@@ -40,7 +41,7 @@ async def test_get_sub_specialisations(client: AsyncClient, auth_headers: dict[s
         "values": ["Test Sub A"]
     }
     await client.post("/api/v1/dropdown-data/values", json=payload, headers=auth_headers)
-    
+
     response = await client.get("/api/v1/dropdown-data/sub-specialisations", headers=auth_headers)
     assert response.status_code == 200
     assert "Test Sub A" in response.json()["data"]["values"]
@@ -53,7 +54,7 @@ async def test_get_degrees(client: AsyncClient, auth_headers: dict[str, str]) ->
         "values": ["Test Degree A"]
     }
     await client.post("/api/v1/dropdown-data/values", json=payload, headers=auth_headers)
-    
+
     response = await client.get("/api/v1/dropdown-data/degrees", headers=auth_headers)
     assert response.status_code == 200
     assert "Test Degree A" in response.json()["data"]["values"]

@@ -2,10 +2,24 @@
 
 from fastapi import APIRouter, Depends
 
-from .endpoints import blobs, doctors, dropdown_data, health, hospitals, onboarding, onboarding_admin, voice, auth, otp, testimonials, voice_config, admin_dropdown, admin_users
-
-from ...core.security import require_authentication
 from ...core.rbac import require_admin, require_admin_or_operational
+from ...core.security import require_authentication
+from .endpoints import (
+	admin_dropdown,
+	admin_users,
+	auth,
+	blobs,
+	doctors,
+	dropdown_data,
+	health,
+	hospitals,
+	onboarding,
+	onboarding_admin,
+	otp,
+	testimonials,
+	voice,
+	voice_config,
+)
 
 # Create versioned router
 router = APIRouter(prefix="/api/v1")

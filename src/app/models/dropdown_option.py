@@ -6,17 +6,17 @@ Supports admin-seeded defaults and user-contributed values with full audit trail
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
+    Index,
     Integer,
     String,
     Text,
-    Boolean,
-    Index,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,7 +30,7 @@ def utc_now() -> datetime:
 
 class DropdownFieldCategory(str, Enum):
     """Categories of dropdown fields for grouping."""
-    
+
     PROFESSIONAL_IDENTITY = "professional_identity"  # Block 1
     CREDENTIALS = "credentials"  # Block 2
     CLINICAL_EXPERTISE = "clinical_expertise"  # Block 3
@@ -41,7 +41,7 @@ class DropdownFieldCategory(str, Enum):
 
 class CreatorType(str, Enum):
     """Type of entity that created the dropdown value."""
-    
+
     SYSTEM = "system"  # Initial seed data
     ADMIN = "admin"  # Admin-added values
     DOCTOR = "doctor"  # Doctor-contributed during onboarding
@@ -82,7 +82,7 @@ class DropdownOption(Base):
         index=True,
         comment="The model field this option belongs to (e.g., 'specialty', 'fellowships')",
     )
-    
+
     category: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
@@ -97,14 +97,14 @@ class DropdownOption(Base):
         nullable=False,
         comment="The dropdown option value",
     )
-    
+
     # Optional display label (if different from value)
     display_label: Mapped[str | None] = mapped_column(
         String(500),
         nullable=True,
         comment="Optional display label for UI (if different from value)",
     )
-    
+
     # Optional description/help text
     description: Mapped[str | None] = mapped_column(
         Text,
@@ -119,19 +119,19 @@ class DropdownOption(Base):
         default=CreatorType.SYSTEM.value,
         comment="Who created this: system, admin, or doctor",
     )
-    
+
     created_by_id: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
         comment="Doctor ID if created by a doctor during onboarding",
     )
-    
+
     created_by_name: Mapped[str | None] = mapped_column(
         String(200),
         nullable=True,
         comment="Name of creator (doctor name or admin username)",
     )
-    
+
     created_by_email: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
@@ -145,14 +145,14 @@ class DropdownOption(Base):
         default=True,
         comment="Whether this option is currently available for selection",
     )
-    
+
     is_verified: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,
         comment="Whether this option has been verified/approved by admin",
     )
-    
+
     # Display ordering
     display_order: Mapped[int] = mapped_column(
         Integer,
@@ -167,7 +167,7 @@ class DropdownOption(Base):
         nullable=False,
         default=utc_now,
     )
-    
+
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -213,7 +213,7 @@ DROPDOWN_FIELD_CONFIG: dict[str, dict[str, Any]] = {
         "allow_custom": True,
         "multi_select": True,
     },
-    
+
     # Block 2: Credentials & Trust Markers
     "fellowships": {
         "category": DropdownFieldCategory.CREDENTIALS,
@@ -239,7 +239,7 @@ DROPDOWN_FIELD_CONFIG: dict[str, dict[str, Any]] = {
         "allow_custom": True,
         "multi_select": True,
     },
-    
+
     # Block 3: Clinical Focus & Expertise
     "areas_of_clinical_interest": {
         "category": DropdownFieldCategory.CLINICAL_EXPERTISE,
@@ -272,7 +272,7 @@ DROPDOWN_FIELD_CONFIG: dict[str, dict[str, Any]] = {
         "allow_custom": True,
         "multi_select": True,
     },
-    
+
     # Block 4: The Human Side
     "training_experience": {
         "category": DropdownFieldCategory.PERSONAL,
@@ -304,7 +304,7 @@ DROPDOWN_FIELD_CONFIG: dict[str, dict[str, Any]] = {
         "allow_custom": True,
         "multi_select": True,
     },
-    
+
     # General fields
     "languages_spoken": {
         "category": DropdownFieldCategory.GENERAL,

@@ -11,13 +11,14 @@ import base64
 import hashlib
 import hmac
 import json
-from datetime import datetime, timezone
-from typing import Any, Annotated
+from datetime import UTC, datetime
+from typing import Annotated, Any
 
 from fastapi import Depends, Request
 
 from .config import Settings, get_settings
 from .exceptions import UnauthorizedError
+
 
 def _base64url_decode(data: str) -> bytes:
     """Decode a base64url-encoded string, handling missing padding."""
@@ -76,7 +77,7 @@ def _decode_jwt(token: str, *, settings: Settings) -> dict[str, Any]:
             error_code="INVALID_TOKEN",
         )
 
-    now_ts = int(datetime.now(timezone.utc).timestamp())
+    now_ts = int(datetime.now(UTC).timestamp())
     if now_ts >= exp:
         raise UnauthorizedError(
             message="Token has expired",

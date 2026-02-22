@@ -1,10 +1,12 @@
 """Unit tests for Resume Extraction Service."""
 
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.app.core.exceptions import FileValidationError, ExtractionError
+import pytest
+
+from src.app.core.exceptions import ExtractionError, FileValidationError
 from src.app.services.extraction_service import ResumeExtractionService
+
 
 @pytest.fixture
 def mock_gemini():
@@ -38,9 +40,9 @@ async def test_extract_from_file_success(extraction_service, mock_gemini):
         "personal_details": {"first_name": "Test", "last_name": "Doctor"},
         "professional_information": {"primary_specialization": "General"},
     }
-    
+
     data, time_ms = await extraction_service.extract_from_file(b"dummy", "resume.pdf")
-    
+
     assert data.personal_details.first_name == "Test"
     assert time_ms > 0
     mock_gemini.generate_with_vision.assert_called_once()
@@ -48,7 +50,7 @@ async def test_extract_from_file_success(extraction_service, mock_gemini):
 @pytest.mark.asyncio
 async def test_extract_from_file_failure(extraction_service, mock_gemini):
     mock_gemini.generate_with_vision.side_effect = Exception("API Error")
-    
+
     with pytest.raises(ExtractionError) as exc:
         await extraction_service.extract_from_file(b"dummy", "resume.pdf")
     assert "Failed to extract" in str(exc.value)
@@ -59,9 +61,9 @@ async def test_extract_from_text_success(extraction_service, mock_gemini):
         "personal_details": {"first_name": "Test", "last_name": "Doctor"},
         "professional_information": {"primary_specialization": "General"},
     }
-    
+
     data, time_ms = await extraction_service.extract_from_text("Dummy resume content")
-    
+
     assert data.personal_details.first_name == "Test"
     assert time_ms > 0
     mock_gemini.generate_structured.assert_called_once()
@@ -69,7 +71,7 @@ async def test_extract_from_text_success(extraction_service, mock_gemini):
 @pytest.mark.asyncio
 async def test_extract_from_text_failure(extraction_service, mock_gemini):
     mock_gemini.generate_structured.side_effect = Exception("API Error")
-    
+
     with pytest.raises(ExtractionError) as exc:
         await extraction_service.extract_from_text("Dummy content")
     assert "Failed to extract" in str(exc.value)

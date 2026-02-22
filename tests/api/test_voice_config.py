@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
 import pytest
 
 if TYPE_CHECKING:
@@ -90,13 +91,13 @@ async def test_delete_block(client: AsyncClient, auth_headers: dict[str, str]) -
     block_payload = {"block_number": 99, "block_name": "to_delete", "display_name": "Delete Me"}
     create_resp = await client.post("/api/v1/voice-config/blocks", json=block_payload, headers=auth_headers)
     block_id = create_resp.json()["data"]["id"]
-    
+
     response = await client.delete(f"/api/v1/voice-config/blocks/{block_id}", headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["data"]["deleted"] is True
-    
+
     # Try getting it
-    get_resp = await client.get(f"/api/v1/voice-config/blocks/99", headers=auth_headers)
+    get_resp = await client.get("/api/v1/voice-config/blocks/99", headers=auth_headers)
     assert get_resp.status_code == 404
 
 @pytest.mark.asyncio
@@ -133,7 +134,7 @@ async def test_delete_field(client: AsyncClient, sample_voice_block: dict, auth_
     }
     create_resp = await client.post("/api/v1/voice-config/fields", json=payload, headers=auth_headers)
     field_id = create_resp.json()["data"]["id"]
-    
+
     response = await client.delete(f"/api/v1/voice-config/fields/{field_id}", headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["data"]["deleted"] is True

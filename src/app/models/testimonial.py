@@ -5,15 +5,14 @@ Stores doctor testimonials/comments for homepage carousel.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, UTC
-from typing import Any
+from datetime import UTC, datetime
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Integer,
     String,
     Text,
-    Boolean,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -44,7 +43,7 @@ class Testimonial(Base):
     profile_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     comment: Mapped[str] = mapped_column(Text, nullable=False)
     rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    
+
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 

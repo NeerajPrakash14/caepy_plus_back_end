@@ -12,26 +12,28 @@ These models are designed to work with PostgreSQL via the shared SQLAlchemy Base
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
 from sqlalchemy import (
-	BigInteger,
-	DateTime,
-	ForeignKey,
-	Integer,
-	Float,
-	String,
-	Text,
-	Boolean,
-	JSON,
-	Enum as SQLEnum,
-	func,
+    JSON,
+    BigInteger,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
+from sqlalchemy import (
+    Enum as SQLEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..db.session import Base
+
 
 def utc_now() -> datetime:
     """Return current UTC time (timezone-aware)."""
@@ -117,16 +119,16 @@ class DoctorIdentity(Base):
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    details: Mapped["DoctorDetails"] = relationship(
+    details: Mapped[DoctorDetails] = relationship(
         back_populates="identity",
         uselist=False,
         cascade="all, delete-orphan",
     )
-    media: Mapped[list["DoctorMedia"]] = relationship(
+    media: Mapped[list[DoctorMedia]] = relationship(
         back_populates="identity",
         cascade="all, delete-orphan",
     )
-    status_history: Mapped[list["DoctorStatusHistory"]] = relationship(
+    status_history: Mapped[list[DoctorStatusHistory]] = relationship(
         back_populates="identity",
         cascade="all, delete-orphan",
     )

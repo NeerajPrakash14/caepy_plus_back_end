@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Tuple
 
 from ..core.exceptions import ExtractionError, FileValidationError
 from ..core.prompts import get_prompt_manager
@@ -29,7 +28,7 @@ class ResumeExtractionService:
     
     All prompts are loaded from external configuration via PromptManager.
     """
-    
+
     # Supported MIME types
     MIME_TYPES: dict[str, str] = {
         "pdf": "application/pdf",
@@ -38,12 +37,12 @@ class ResumeExtractionService:
         "jpeg": "image/jpeg",
         "webp": "image/webp",
     }
-    
+
     def __init__(self) -> None:
         """Initialize with dependencies."""
         self.gemini = get_gemini_service()
         self.prompt_manager = get_prompt_manager()
-    
+
     def _get_mime_type(self, filename: str) -> str:
         """
         Determine MIME type from filename extension.
@@ -59,16 +58,16 @@ class ResumeExtractionService:
         """
         extension = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
         mime_type = self.MIME_TYPES.get(extension)
-        
+
         if not mime_type:
             raise FileValidationError(
                 message=f"Unsupported file type: {extension}",
                 filename=filename,
                 allowed_types=list(self.MIME_TYPES.keys()),
             )
-        
+
         return mime_type
-    
+
     def _get_extraction_prompt(self) -> str:
         """
         Get the extraction prompt from external configuration.
@@ -76,12 +75,12 @@ class ResumeExtractionService:
         Combines system prompt, response schema, and instruction.
         """
         return self.prompt_manager.get_resume_extraction_prompt()
-    
+
     async def extract_from_file(
         self,
         file_content: bytes,
         filename: str,
-    ) -> Tuple[ResumeExtractedData, float]:
+    ) -> tuple[ResumeExtractedData, float]:
         """
         Extract structured data from an uploaded resume file.
         
@@ -98,15 +97,15 @@ class ResumeExtractionService:
             AIServiceError: If AI service is unavailable
         """
         start_time = time.time()
-        
+
         mime_type = self._get_mime_type(filename)
-        
+
         logger.info(f"Extracting data from {filename} ({mime_type})")
-        
+
         try:
             # Get prompt from external config
             extraction_prompt = self._get_extraction_prompt()
-            
+
             # Call Gemini Vision API
             parsed_data = await self.gemini.generate_with_vision(
                 prompt=extraction_prompt,
@@ -114,19 +113,19 @@ class ResumeExtractionService:
                 mime_type=mime_type,
                 temperature=0.1,  # Low temperature for consistent extraction
             )
-            
+
             # Validate and create response object
             extracted_data = ResumeExtractedData(**parsed_data)
-            
+
             processing_time = (time.time() - start_time) * 1000
-            
+
             logger.info(
                 f"Successfully extracted data from {filename} "
                 f"in {processing_time:.2f}ms"
             )
-            
+
             return extracted_data, processing_time
-            
+
         except ExtractionError:
             raise
         except Exception as e:
@@ -136,11 +135,11 @@ class ResumeExtractionService:
                 source="resume",
                 details={"filename": filename, "error": str(e)},
             )
-    
+
     async def extract_from_text(
         self,
         text_content: str,
-    ) -> Tuple[ResumeExtractedData, float]:
+    ) -> tuple[ResumeExtractedData, float]:
         """
         Extract structured data from plain text resume content.
         
@@ -153,25 +152,25 @@ class ResumeExtractionService:
             Tuple of (extracted_data, processing_time_ms)
         """
         start_time = time.time()
-        
+
         logger.info(f"Extracting from text ({len(text_content)} chars)")
-        
+
         try:
             extraction_prompt = self._get_extraction_prompt()
             full_prompt = f"{extraction_prompt}\n\n---\n\nRESUME TEXT:\n{text_content}"
-            
+
             parsed_data = await self.gemini.generate_structured(
                 prompt=full_prompt,
                 temperature=0.1,
             )
-            
+
             extracted_data = ResumeExtractedData(**parsed_data)
             processing_time = (time.time() - start_time) * 1000
-            
+
             logger.info(f"Text extraction completed in {processing_time:.2f}ms")
-            
+
             return extracted_data, processing_time
-            
+
         except ExtractionError:
             raise
         except Exception as e:

@@ -9,17 +9,17 @@ Data access layer for dropdown options with support for:
 from __future__ import annotations
 
 import logging
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from ..models.dropdown_option import (
-    DropdownOption,
+    DROPDOWN_FIELD_CONFIG,
     CreatorType,
     DropdownFieldCategory,
-    DROPDOWN_FIELD_CONFIG,
+    DropdownOption,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,18 +60,18 @@ class DropdownOptionRepository:
             List of dropdown options ordered by display_order, then value
         """
         stmt = select(DropdownOption).where(DropdownOption.field_name == field_name)
-        
+
         if active_only:
             stmt = stmt.where(DropdownOption.is_active.is_(True))
-        
+
         if verified_only:
             stmt = stmt.where(DropdownOption.is_verified.is_(True))
-        
+
         stmt = stmt.order_by(
             DropdownOption.display_order.asc(),
             DropdownOption.value.asc(),
         )
-        
+
         result = await self.session.execute(stmt)
         return result.scalars().all()
 
@@ -98,28 +98,28 @@ class DropdownOptionRepository:
             Dict mapping field_name to list of values
         """
         cat_value = category.value if isinstance(category, DropdownFieldCategory) else category
-        
+
         stmt = select(DropdownOption).where(DropdownOption.category == cat_value)
-        
+
         if active_only:
             stmt = stmt.where(DropdownOption.is_active.is_(True))
-        
+
         stmt = stmt.order_by(
             DropdownOption.field_name,
             DropdownOption.display_order.asc(),
             DropdownOption.value.asc(),
         )
-        
+
         result = await self.session.execute(stmt)
         options = result.scalars().all()
-        
+
         # Group by field_name
         grouped: dict[str, list[str]] = {}
         for opt in options:
             if opt.field_name not in grouped:
                 grouped[opt.field_name] = []
             grouped[opt.field_name].append(opt.value)
-        
+
         return grouped
 
     async def get_all_dropdown_data(
@@ -135,25 +135,25 @@ class DropdownOptionRepository:
             Dict with field configurations and values
         """
         stmt = select(DropdownOption)
-        
+
         if active_only:
             stmt = stmt.where(DropdownOption.is_active.is_(True))
-        
+
         stmt = stmt.order_by(
             DropdownOption.field_name,
             DropdownOption.display_order.asc(),
             DropdownOption.value.asc(),
         )
-        
+
         result = await self.session.execute(stmt)
         options = result.scalars().all()
-        
+
         # Build response
         data: dict[str, Any] = {}
-        
+
         for field_name, config in DROPDOWN_FIELD_CONFIG.items():
             field_options = [opt for opt in options if opt.field_name == field_name]
-            
+
             if include_metadata:
                 data[field_name] = {
                     "display_name": config["display_name"],
@@ -165,7 +165,7 @@ class DropdownOptionRepository:
                 }
             else:
                 data[field_name] = [opt.value for opt in field_options]
-        
+
         return data
 
     async def value_exists(self, field_name: str, value: str) -> bool:
@@ -221,7 +221,7 @@ class DropdownOptionRepository:
         category = config.get("category", DropdownFieldCategory.GENERAL)
         if isinstance(category, DropdownFieldCategory):
             category = category.value
-        
+
         option = DropdownOption(
             field_name=field_name,
             category=category,
@@ -235,16 +235,16 @@ class DropdownOptionRepository:
             is_verified=is_verified,
             display_order=display_order,
         )
-        
+
         self.session.add(option)
         await self.session.commit()
         await self.session.refresh(option)
-        
+
         logger.info(
             f"Created dropdown option: field={field_name}, value={value[:50]}, "
             f"creator={creator_type}"
         )
-        
+
         return option
 
     async def create_if_not_exists(
@@ -268,7 +268,7 @@ class DropdownOptionRepository:
         # Check if exists
         if await self.value_exists(field_name, value):
             return None, False
-        
+
         # Create new
         option = await self.create(
             field_name=field_name,
@@ -279,7 +279,7 @@ class DropdownOptionRepository:
             created_by_email=created_by_email,
             is_verified=creator_type in (CreatorType.SYSTEM, CreatorType.ADMIN),
         )
-        
+
         return option, True
 
     async def bulk_create(
@@ -305,16 +305,16 @@ class DropdownOptionRepository:
             Number of options created
         """
         created_count = 0
-        
+
         for idx, value in enumerate(values):
             if not value or not value.strip():
                 continue
-            
+
             value = value.strip()
-            
+
             if skip_existing and await self.value_exists(field_name, value):
                 continue
-            
+
             await self.create(
                 field_name=field_name,
                 value=value,
@@ -324,7 +324,7 @@ class DropdownOptionRepository:
                 display_order=idx,
             )
             created_count += 1
-        
+
         logger.info(f"Bulk created {created_count} options for field={field_name}")
         return created_count
 
@@ -341,16 +341,16 @@ class DropdownOptionRepository:
         option = await self.get_by_id(option_id)
         if not option:
             return None
-        
+
         allowed_fields = {
             "value", "display_label", "description", "is_active",
             "is_verified", "display_order", "category",
         }
-        
+
         for key, value in kwargs.items():
             if key in allowed_fields and value is not None:
                 setattr(option, key, value)
-        
+
         await self.session.commit()
         await self.session.refresh(option)
         return option
@@ -376,10 +376,10 @@ class DropdownOptionRepository:
         option = await self.get_by_id(option_id)
         if not option:
             return False
-        
+
         await self.session.delete(option)
         await self.session.commit()
-        
+
         logger.info(f"Deleted dropdown option: {option_id}")
         return True
 
@@ -417,15 +417,15 @@ class DropdownOptionRepository:
         if config.get("predefined_only", False):
             logger.debug(f"Field {field_name} does not allow custom values")
             return []
-        
+
         new_values = []
-        
+
         for value in values:
             if not value or not value.strip():
                 continue
-            
+
             value = value.strip()
-            
+
             option, was_created = await self.create_if_not_exists(
                 field_name=field_name,
                 value=value,
@@ -434,14 +434,14 @@ class DropdownOptionRepository:
                 created_by_name=doctor_name,
                 created_by_email=doctor_email,
             )
-            
+
             if was_created:
                 new_values.append(value)
                 logger.info(
                     f"Auto-saved new dropdown value: field={field_name}, "
                     f"value={value[:50]}, doctor_id={doctor_id}"
                 )
-        
+
         return new_values
 
     async def get_unverified(self) -> Sequence[DropdownOption]:
@@ -454,7 +454,7 @@ class DropdownOptionRepository:
         ).order_by(
             DropdownOption.created_at.desc(),
         )
-        
+
         result = await self.session.execute(stmt)
         return result.scalars().all()
 
@@ -479,10 +479,10 @@ class DropdownOptionRepository:
             DropdownOption.is_active,
             DropdownOption.is_verified,
         )
-        
+
         result = await self.session.execute(stmt)
         rows = result.all()
-        
+
         # Initialize stats
         stats: dict[str, Any] = {
             "total_options": 0,
@@ -497,27 +497,27 @@ class DropdownOptionRepository:
             },
             "unverified_doctor_contributions": 0,
         }
-        
+
         for field_name, category, creator_type, is_active, is_verified, count in rows:
             stats["total_options"] += count
-            
+
             if is_active:
                 stats["active_options"] += count
-            
+
             if is_verified:
                 stats["verified_options"] += count
-            
+
             # Count by field
             stats["options_by_field"][field_name] = stats["options_by_field"].get(field_name, 0) + count
-            
+
             # Count by category
             stats["options_by_category"][category] = stats["options_by_category"].get(category, 0) + count
-            
+
             # Count by creator type
             stats["options_by_creator_type"][creator_type] = stats["options_by_creator_type"].get(creator_type, 0) + count
-            
+
             # Count unverified doctor contributions
             if creator_type == CreatorType.DOCTOR.value and not is_verified and is_active:
                 stats["unverified_doctor_contributions"] += count
-        
+
         return stats

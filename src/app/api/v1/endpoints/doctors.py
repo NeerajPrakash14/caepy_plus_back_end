@@ -5,22 +5,23 @@ RESTful API for doctor resource management.
 """
 
 import os
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ....core.exceptions import DoctorNotFoundError
 from ....core.responses import GenericResponse, PaginatedResponse, PaginationMeta
-from ....db.session import DbSession, Base
+from ....db.session import Base, DbSession
 from ....repositories.doctor_repository import DoctorRepository
+from ....repositories.hospital_repository import (
+    DoctorHospitalAffiliationRepository,
+    HospitalRepository,
+)
 from ....repositories.onboarding_repository import OnboardingRepository
-from ....repositories.hospital_repository import HospitalRepository, DoctorHospitalAffiliationRepository
 from ....schemas.doctor import (
     DoctorCreate,
     DoctorResponse,
-    DoctorSummary,
     DoctorUpdate,
 )
 
@@ -57,7 +58,7 @@ async def create_doctor(
     - **practice_locations**: List of clinic/hospital locations
     """
     doctor = await repo.create(data)
-    
+
     return GenericResponse(
         message="Doctor created successfully",
         data=DoctorResponse.model_validate(doctor),
@@ -82,14 +83,14 @@ async def list_doctors(
     Supports filtering by specialization using partial matching.
     """
     skip = (page - 1) * page_size
-    
+
     doctors = await repo.get_all(
         skip=skip,
         limit=page_size,
         specialization=specialization,
     )
     total = await repo.count(specialization=specialization)
-    
+
     return PaginatedResponse(
         message="Doctors retrieved successfully",
         data=[DoctorResponse.model_validate(d) for d in doctors],
@@ -146,11 +147,11 @@ async def get_doctor_by_email(
     Useful for checking if a doctor is already registered.
     """
     from ....core.exceptions import DoctorNotFoundError
-    
+
     doctor = await repo.get_by_email(email)
     if not doctor:
         raise DoctorNotFoundError(email=email)
-    
+
     return GenericResponse(
         message="Doctor retrieved successfully",
         data=DoctorResponse.model_validate(doctor),
@@ -251,7 +252,7 @@ async def delete_doctor(
     summary="Erase doctor records",
     description=(
         "Permanently and irreversibly remove a doctor's records from all "
-        "related tables by doctor_id. Use this for full erasure/" 
+        "related tables by doctor_id. Use this for full erasure/"
         "right-to-be-forgotten workflows."
     ),
 )

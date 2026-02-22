@@ -44,7 +44,7 @@ class PromptManager:
         prompt = manager.get("resume_extraction.system_prompt")
         formatted = manager.format("voice_onboarding.greeting_template", name="Dr. Smith")
     """
-    
+
     def __init__(self, config_path: Path | None = None) -> None:
         """
         Initialize the prompt manager.
@@ -55,35 +55,35 @@ class PromptManager:
         if config_path is None:
             # Default to config/prompts.yaml relative to project root
             config_path = Path(__file__).parent.parent.parent.parent / "config" / "prompts.yaml"
-        
+
         self.config_path = config_path
         self._prompts: dict[str, Any] | None = None
         self._load_prompts()
-    
+
     def _load_prompts(self) -> None:
         """Load prompts from YAML configuration file."""
         if not self.config_path.exists():
             raise ConfigurationError(
                 f"Prompt configuration file not found: {self.config_path}"
             )
-        
+
         try:
-            with open(self.config_path, "r", encoding="utf-8") as f:
+            with open(self.config_path, encoding="utf-8") as f:
                 self._prompts = yaml.safe_load(f)
-            
+
             logger.info(f"Loaded prompts from {self.config_path}")
-            
+
         except yaml.YAMLError as e:
             raise ConfigurationError(
                 f"Invalid YAML in prompts configuration: {e}"
             )
-    
+
     def reload(self) -> None:
         """Reload prompts from disk (useful for development)."""
         self._prompts = None
         self._load_prompts()
         logger.info("Prompts reloaded")
-    
+
     def get(self, path: str, default: str | None = None) -> str:
         """
         Get a prompt by dot-notation path.
@@ -103,27 +103,27 @@ class PromptManager:
         """
         if self._prompts is None:
             self._load_prompts()
-        
+
         keys = path.split(".")
         value: Any = self._prompts
-        
+
         try:
             for key in keys:
                 if isinstance(value, dict):
                     value = value[key]
                 else:
                     raise KeyError(key)
-            
+
             if not isinstance(value, str):
                 raise KeyError(f"Path '{path}' does not point to a string")
-            
+
             return value
-            
+
         except KeyError:
             if default is not None:
                 return default
             raise KeyError(f"Prompt not found: {path}")
-    
+
     def get_dict(self, path: str) -> dict[str, Any]:
         """
         Get a nested dictionary of prompts.
@@ -136,21 +136,21 @@ class PromptManager:
         """
         if self._prompts is None:
             self._load_prompts()
-        
+
         keys = path.split(".")
         value: Any = self._prompts
-        
+
         for key in keys:
             if isinstance(value, dict):
                 value = value[key]
             else:
                 raise KeyError(f"Invalid path: {path}")
-        
+
         if not isinstance(value, dict):
             raise KeyError(f"Path '{path}' does not point to a dictionary")
-        
+
         return value
-    
+
     def get_value(self, path: str) -> Any:
         """
         Get any value (dict, list, str, etc.) from config by path.
@@ -163,20 +163,18 @@ class PromptManager:
         """
         if self._prompts is None:
             self._load_prompts()
-        
+
         keys = path.split(".")
         value: Any = self._prompts
-        
+
         for key in keys:
             if isinstance(value, dict):
                 value = value[key]
             else:
                 raise KeyError(f"Invalid path: {path}")
-        
+
         return value
-        
-        return value
-    
+
     def format(self, path: str, **kwargs: Any) -> str:
         """
         Get a prompt and format it with template variables.
@@ -195,12 +193,12 @@ class PromptManager:
             )
         """
         template = self.get(path)
-        
+
         try:
             return template.format(**kwargs)
         except KeyError as e:
             raise ValueError(f"Missing template variable in {path}: {e}")
-    
+
     def get_resume_extraction_prompt(self) -> str:
         """
         Get the complete resume extraction prompt.
@@ -210,13 +208,13 @@ class PromptManager:
         system = self.get("resume_extraction.system_prompt")
         schema = self.get("resume_extraction.response_schema")
         instruction = self.get("resume_extraction.instruction")
-        
+
         return f"{system}\n\n{schema}\n\n{instruction}"
-    
+
     def get_voice_greeting(self) -> str:
         """Get the voice session greeting message."""
         return self.get("voice_onboarding.greeting_template")
-    
+
     def get_voice_field_prompt(self, field_name: str, prompt_type: str = "question") -> str:
         """
         Get a field-specific voice prompt.
@@ -230,7 +228,7 @@ class PromptManager:
         """
         path = f"voice_onboarding.field_prompts.{field_name}.{prompt_type}"
         return self.get(path, default=f"Please provide your {field_name.replace('_', ' ')}.")
-    
+
     def get_voice_extraction_prompt(
         self,
         user_message: str,
@@ -249,21 +247,21 @@ class PromptManager:
             Formatted extraction prompt
         """
         template = self.get("voice_onboarding.extraction_prompt")
-        
+
         return template.format(
             user_message=user_message,
             collected_fields=", ".join(collected_fields) if collected_fields else "None",
             missing_fields=", ".join(missing_fields) if missing_fields else "None",
         )
-    
+
     def get_voice_confirmation_prompt(self, collected_data: dict[str, Any]) -> str:
         """Get the confirmation prompt with collected data."""
         template = self.get("voice_onboarding.confirmation_prompt")
-        
+
         # Format collected data as readable text
         data_lines = [f"- {k.replace('_', ' ').title()}: {v}" for k, v in collected_data.items()]
         data_text = "\n".join(data_lines)
-        
+
         return template.format(collected_data=data_text)
 
     def get_profile_generation_prompt(self, doctor_data: dict[str, Any]) -> str:
@@ -281,7 +279,7 @@ class PromptManager:
             f"## REQUIRED OUTPUT FORMAT\n{schema}\n\n"
             f"## TASK\n{instruction}"
         )
-    
+
     def get_profile_generation_prompt_with_variants(
         self,
         doctor_data: dict[str, Any],
@@ -301,14 +299,14 @@ class PromptManager:
         doctor_json = json.dumps(doctor_data, ensure_ascii=False, indent=2)
         schema = self.get("profile_generation.response_schema")
         base_instruction = self.get("profile_generation.base_instruction")
-        
+
         # Build section-specific prompts
         section_prompts = []
-        
+
         for section in PROFILE_SECTIONS:
             variant_idx = variant_indices.get(section, 0)
             variant_data = self._get_variant_data(section, variant_idx)
-            
+
             if variant_data:
                 section_prompts.append(
                     f"### {section.upper().replace('_', ' ')}\n"
@@ -316,9 +314,9 @@ class PromptManager:
                     f"System Context:\n{variant_data['system_prompt']}\n"
                     f"Instructions:\n{variant_data['instruction']}"
                 )
-        
+
         sections_text = "\n\n".join(section_prompts)
-        
+
         prompt = (
             f"# PROFILE CONTENT GENERATION\n\n"
             f"## DOCTOR ONBOARDING DATA (JSON)\n{doctor_json}\n\n"
@@ -326,10 +324,10 @@ class PromptManager:
             f"## OUTPUT FORMAT\n{schema}\n\n"
             f"## GENERAL RULES\n{base_instruction}"
         )
-        
+
         logger.debug(f"Generated variant prompt with indices: {variant_indices}")
         return prompt
-    
+
     def _get_variant_data(self, section: str, variant_idx: int) -> dict[str, Any] | None:
         """
         Get variant data for a specific section and index.
@@ -343,20 +341,20 @@ class PromptManager:
         """
         try:
             variants = self.get_value(f"profile_generation.{section}.variants")
-            
+
             if isinstance(variants, list) and 0 <= variant_idx < len(variants):
                 return variants[variant_idx]
-            
+
             # Fallback to first variant if index out of range
             if variants:
                 logger.warning(f"Variant index {variant_idx} out of range for {section}, using 0")
                 return variants[0]
-                
+
         except KeyError:
             logger.warning(f"No variants found for section: {section}")
-        
+
         return None
-    
+
     def get_variant_count(self, section: str) -> int:
         """Get the number of available variants for a section."""
         try:
@@ -364,7 +362,7 @@ class PromptManager:
             return len(variants) if isinstance(variants, list) else DEFAULT_VARIANT_COUNT
         except KeyError:
             return DEFAULT_VARIANT_COUNT
-    
+
     def get_all_variant_info(self) -> dict[str, list[dict[str, Any]]]:
         """
         Get information about all available variants for each section.
@@ -373,7 +371,7 @@ class PromptManager:
             Dict mapping section name to list of variant info dicts
         """
         result = {}
-        
+
         for section in PROFILE_SECTIONS:
             try:
                 variants = self.get_value(f"profile_generation.{section}.variants")
@@ -390,7 +388,7 @@ class PromptManager:
                     result[section] = []
             except KeyError:
                 result[section] = []
-        
+
         return result
 
 # -----------------------------------------------------------------------------

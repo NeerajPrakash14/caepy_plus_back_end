@@ -17,7 +17,6 @@ import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any
-from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +30,12 @@ PROMPT_VARIANT_COUNT = 3
 @dataclass
 class PromptUsageRecord:
     """Tracks which prompt variants have been used for a specific section."""
-    
+
     used_variants: list[int] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
     last_accessed: float = field(default_factory=time.time)
     cycle_count: int = 0  # Track how many full cycles completed
-    
+
     def get_next_variant(self, total_variants: int = PROMPT_VARIANT_COUNT) -> int:
         """
         Get the next unused variant index using round-robin.
@@ -48,13 +47,13 @@ class PromptUsageRecord:
             Index of the next variant to use (0-indexed)
         """
         self.last_accessed = time.time()
-        
+
         # Calculate how many times we've used each variant in the current cycle
         current_cycle_usage = self.used_variants[-(total_variants):] if len(self.used_variants) >= total_variants else self.used_variants
-        
+
         # Find unused variants in the current cycle
         used_in_cycle = set(current_cycle_usage[-total_variants:]) if len(self.used_variants) > 0 else set()
-        
+
         # If we have fewer than total_variants usages, just check direct usage
         if len(self.used_variants) < total_variants:
             available = [i for i in range(total_variants) if i not in self.used_variants]
@@ -62,19 +61,19 @@ class PromptUsageRecord:
             # Check the last cycle's worth of usage
             last_cycle = self.used_variants[-(len(self.used_variants) % total_variants or total_variants):]
             available = [i for i in range(total_variants) if i not in last_cycle]
-        
+
         if not available:
             # Start a new cycle - all variants available
             self.cycle_count += 1
             available = list(range(total_variants))
             logger.info(f"Starting new cycle {self.cycle_count + 1}, all {total_variants} variants available")
-        
+
         # Pick the first available variant
         next_variant = available[0]
         self.used_variants.append(next_variant)
-        
+
         return next_variant
-    
+
     def is_expired(self, ttl_seconds: int = DEFAULT_SESSION_TTL_SECONDS) -> bool:
         """Check if this record has expired."""
         return (time.time() - self.last_accessed) > ttl_seconds
@@ -87,17 +86,17 @@ class DoctorPromptSession:
     
     Structure: section_name -> PromptUsageRecord
     """
-    
+
     sections: dict[str, PromptUsageRecord] = field(default_factory=dict)
     doctor_identifier: str = ""
     created_at: float = field(default_factory=time.time)
-    
+
     def get_section_record(self, section: str) -> PromptUsageRecord:
         """Get or create a usage record for a section."""
         if section not in self.sections:
             self.sections[section] = PromptUsageRecord()
         return self.sections[section]
-    
+
     def get_next_variant_for_section(
         self,
         section: str,
@@ -106,7 +105,7 @@ class DoctorPromptSession:
         """Get the next variant index for a specific section."""
         record = self.get_section_record(section)
         return record.get_next_variant(total_variants)
-    
+
     def get_usage_stats(self) -> dict[str, Any]:
         """Get usage statistics for all sections."""
         return {
@@ -138,7 +137,7 @@ class PromptSessionService:
         variant_idx = await service.get_next_variant("doctor_123", "professional_overview")
         # variant_idx will be 0, 1, or 2, cycling through unused variants
     """
-    
+
     def __init__(self, ttl_seconds: int = DEFAULT_SESSION_TTL_SECONDS) -> None:
         """
         Initialize the session service.
@@ -151,9 +150,9 @@ class PromptSessionService:
         self._ttl_seconds = ttl_seconds
         self._last_cleanup = time.time()
         self._cleanup_interval = 3600  # Run cleanup every hour
-        
+
         logger.info(f"PromptSessionService initialized with TTL={ttl_seconds}s")
-    
+
     async def get_next_variant(
         self,
         doctor_identifier: str,
@@ -174,31 +173,31 @@ class PromptSessionService:
         async with self._lock:
             # Lazy cleanup
             await self._maybe_cleanup()
-            
+
             # Get or create session
             if doctor_identifier not in self._sessions:
                 self._sessions[doctor_identifier] = DoctorPromptSession(
                     doctor_identifier=doctor_identifier
                 )
                 logger.debug(f"Created new prompt session for: {doctor_identifier}")
-            
+
             session = self._sessions[doctor_identifier]
             variant_idx = session.get_next_variant_for_section(section, total_variants)
-            
+
             logger.info(
                 f"Prompt variant selected: doctor={doctor_identifier}, "
                 f"section={section}, variant={variant_idx + 1}/{total_variants}"
             )
-            
+
             return variant_idx
-    
+
     async def get_session_stats(self, doctor_identifier: str) -> dict[str, Any] | None:
         """Get usage statistics for a doctor's session."""
         async with self._lock:
             if doctor_identifier in self._sessions:
                 return self._sessions[doctor_identifier].get_usage_stats()
             return None
-    
+
     async def clear_session(self, doctor_identifier: str) -> bool:
         """
         Clear a doctor's session (reset variant tracking).
@@ -214,7 +213,7 @@ class PromptSessionService:
                 logger.info(f"Cleared prompt session for: {doctor_identifier}")
                 return True
             return False
-    
+
     async def clear_section(self, doctor_identifier: str, section: str) -> bool:
         """
         Clear variant tracking for a specific section only.
@@ -230,15 +229,15 @@ class PromptSessionService:
                     logger.info(f"Cleared section {section} for: {doctor_identifier}")
                     return True
             return False
-    
+
     async def _maybe_cleanup(self) -> None:
         """Run cleanup if enough time has passed since last cleanup."""
         if (time.time() - self._last_cleanup) < self._cleanup_interval:
             return
-        
+
         await self._cleanup_expired_sessions()
         self._last_cleanup = time.time()
-    
+
     async def _cleanup_expired_sessions(self) -> None:
         """Remove expired sessions to prevent memory leaks."""
         expired = [
@@ -249,13 +248,13 @@ class PromptSessionService:
             )
             or not session.sections  # Empty sessions
         ]
-        
+
         for doc_id in expired:
             del self._sessions[doc_id]
-        
+
         if expired:
             logger.info(f"Cleaned up {len(expired)} expired prompt sessions")
-    
+
     async def get_all_sessions_count(self) -> int:
         """Get total number of active sessions."""
         async with self._lock:

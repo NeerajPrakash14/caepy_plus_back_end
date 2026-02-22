@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
 import pytest
 
 if TYPE_CHECKING:
@@ -50,7 +51,7 @@ async def test_search_hospitals(client: AsyncClient, sample_hospital: int, auth_
     # First verify it so it appears in search
     verify_payload = {"action": "verify", "verified_by": "1"}
     await client.post(f"/api/v1/hospitals/{sample_hospital}/verify", json=verify_payload, headers=auth_headers)
-    
+
     response = await client.get("/api/v1/hospitals/search?q=Apollo", headers=auth_headers)
     assert response.status_code == 200
     assert len(response.json()["data"]) > 0
@@ -112,7 +113,7 @@ async def test_delete_hospital(client: AsyncClient, sample_hospital: int, auth_h
     """Test deleting hospital."""
     response = await client.delete(f"/api/v1/hospitals/{sample_hospital}", headers=auth_headers)
     assert response.status_code == 200
-    
+
     # Verify it doesn't appear in list (if active_only logic applies) or check direct get is_active=False
     get_resp = await client.get(f"/api/v1/hospitals/{sample_hospital}", headers=auth_headers)
     assert get_resp.status_code == 200

@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
 if TYPE_CHECKING:
     from httpx import AsyncClient
 
-from src.app.core.exceptions import SessionNotFoundError, SessionExpiredError
+from src.app.core.exceptions import SessionNotFoundError
+
 
 class DummyStatus:
     def __init__(self, value="active"):
@@ -26,7 +28,7 @@ class DummySession:
         self.field_confidence = {"name": 0.99}
         self.is_complete = is_complete
         self.turn_count = 1
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         self.created_at = now
         self.updated_at = now
         self.expires_at = now
@@ -48,7 +50,7 @@ def mock_voice_service():
         mock_svc.get_session_status = AsyncMock()
         mock_svc.finalize_session = AsyncMock()
         mock_svc.cancel_session = AsyncMock()
-        
+
         mock_get.return_value = mock_svc
         yield mock_svc
 
@@ -58,10 +60,10 @@ async def test_start_session(client: AsyncClient, auth_headers: dict[str, str], 
     """Test starting a voice session."""
     session = DummySession()
     mock_voice_service.start_session.return_value = (session, "Hello Dr.")
-    
+
     payload = {"language": "en"}
     response = await client.post("/api/v1/voice/start", json=payload, headers=auth_headers)
-    
+
     assert response.status_code == 201
     data = response.json()
     assert data["session_id"] == "test-uuid-123"
@@ -72,13 +74,13 @@ async def test_process_chat(client: AsyncClient, auth_headers: dict[str, str], m
     """Test processing a chat message."""
     session = DummySession()
     mock_voice_service.process_message.return_value = (session, "Got it.")
-    
+
     payload = {
         "session_id": "test-uuid-123",
         "user_transcript": "My name is Smith"
     }
     response = await client.post("/api/v1/voice/chat", json=payload, headers=auth_headers)
-    
+
     assert response.status_code == 200
     data = response.json()
     assert data["ai_response"] == "Got it."
@@ -89,9 +91,9 @@ async def test_get_session_status(client: AsyncClient, auth_headers: dict[str, s
     """Test getting session status."""
     session = DummySession()
     mock_voice_service.get_session_status.return_value = session
-    
+
     response = await client.get("/api/v1/voice/session/test-uuid-123", headers=auth_headers)
-    
+
     assert response.status_code == 200
     data = response.json()
     assert data["session_id"] == "test-uuid-123"
@@ -102,9 +104,9 @@ async def test_finalize_session_success(client: AsyncClient, auth_headers: dict[
     session = DummySession(is_complete=True)
     mock_voice_service.get_session_status.return_value = session
     mock_voice_service.finalize_session.return_value = {"name": "Dr. Smith", "specialization": "Cardiology"}
-    
+
     response = await client.post("/api/v1/voice/session/test-uuid-123/finalize", headers=auth_headers)
-    
+
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
@@ -115,9 +117,9 @@ async def test_finalize_session_incomplete(client: AsyncClient, auth_headers: di
     """Test finalising an incomplete session."""
     session = DummySession(is_complete=False)
     mock_voice_service.get_session_status.return_value = session
-    
+
     response = await client.post("/api/v1/voice/session/test-uuid-123/finalize", headers=auth_headers)
-    
+
     assert response.status_code == 400
     assert "Incomplete" in response.json()["detail"]["message"] or "incomplete" in response.json()["detail"]["error"].lower()
 
@@ -125,7 +127,7 @@ async def test_finalize_session_incomplete(client: AsyncClient, auth_headers: di
 async def test_cancel_session(client: AsyncClient, auth_headers: dict[str, str], mock_voice_service: MagicMock) -> None:
     """Test cancelling a session."""
     mock_voice_service.cancel_session.return_value = None
-    
+
     response = await client.delete("/api/v1/voice/session/test-uuid-123", headers=auth_headers)
     assert response.status_code == 204
 
@@ -133,6 +135,6 @@ async def test_cancel_session(client: AsyncClient, auth_headers: dict[str, str],
 async def test_session_not_found(client: AsyncClient, auth_headers: dict[str, str], mock_voice_service: MagicMock) -> None:
     """Test exception handling for missing sessions."""
     mock_voice_service.get_session_status.side_effect = SessionNotFoundError("Not found")
-    
+
     response = await client.get("/api/v1/voice/session/missing-uuid", headers=auth_headers)
     assert response.status_code == 404

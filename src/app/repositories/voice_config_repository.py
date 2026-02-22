@@ -4,8 +4,9 @@ Data access layer for voice onboarding blocks and fields configuration.
 """
 from __future__ import annotations
 
-from typing import Sequence, Any
-from datetime import datetime, UTC
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,10 +41,10 @@ class VoiceConfigRepository:
             .options(selectinload(VoiceOnboardingBlock.fields))
             .order_by(VoiceOnboardingBlock.display_order)
         )
-        
+
         if active_only:
             stmt = stmt.where(VoiceOnboardingBlock.is_active == True)
-        
+
         result = await self.session.execute(stmt)
         return result.scalars().all()
 
@@ -106,11 +107,11 @@ class VoiceConfigRepository:
         block = await self.get_block_by_id(block_id)
         if not block:
             return None
-        
+
         for key, value in kwargs.items():
             if value is not None and hasattr(block, key):
                 setattr(block, key, value)
-        
+
         block.updated_at = utc_now()
         await self.session.commit()
         await self.session.refresh(block)
@@ -121,7 +122,7 @@ class VoiceConfigRepository:
         block = await self.get_block_by_id(block_id)
         if not block:
             return False
-        
+
         await self.session.delete(block)
         await self.session.commit()
         return True
@@ -138,13 +139,13 @@ class VoiceConfigRepository:
     ) -> Sequence[VoiceOnboardingField]:
         """Return fields, optionally filtered by block."""
         stmt = select(VoiceOnboardingField).order_by(VoiceOnboardingField.display_order)
-        
+
         if block_id is not None:
             stmt = stmt.where(VoiceOnboardingField.block_id == block_id)
-        
+
         if active_only:
             stmt = stmt.where(VoiceOnboardingField.is_active == True)
-        
+
         result = await self.session.execute(stmt)
         return result.scalars().all()
 
@@ -213,11 +214,11 @@ class VoiceConfigRepository:
         field = await self.get_field_by_id(field_id)
         if not field:
             return None
-        
+
         for key, value in kwargs.items():
             if hasattr(field, key):
                 setattr(field, key, value)
-        
+
         field.updated_at = utc_now()
         await self.session.commit()
         await self.session.refresh(field)
@@ -228,7 +229,7 @@ class VoiceConfigRepository:
         field = await self.get_field_by_id(field_id)
         if not field:
             return False
-        
+
         await self.session.delete(field)
         await self.session.commit()
         return True
@@ -256,7 +257,7 @@ class VoiceConfigRepository:
         Returns a dict compatible with the FIELD_CONFIG format used by voice_service.
         """
         fields = await self.list_fields(active_only=True)
-        
+
         config = {}
         for field in fields:
             config[field.field_name] = {
@@ -276,5 +277,5 @@ class VoiceConfigRepository:
                     "max_selections": field.max_selections,
                 },
             }
-        
+
         return config

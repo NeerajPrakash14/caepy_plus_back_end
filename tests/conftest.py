@@ -2,24 +2,23 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import hashlib
 import hmac
 import json
 from collections.abc import AsyncGenerator, Generator
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from src.app.core.config import settings
-from src.app.db.session import get_db, Base
+from src.app.db.session import Base, get_db
 from src.app.main import app
 
 if TYPE_CHECKING:
@@ -44,10 +43,10 @@ def _create_test_jwt(
     """
     secret = settings.SECRET_KEY
     algorithm = "HS256"
-    
-    now = datetime.now(timezone.utc)
+
+    now = datetime.now(UTC)
     expire = now + timedelta(minutes=expire_minutes)
-    
+
     payload = {
         "sub": subject,
         "iat": int(now.timestamp()),
@@ -57,19 +56,19 @@ def _create_test_jwt(
         "email": email,
         "role": role,
     }
-    
+
     header = {"alg": algorithm, "typ": "JWT"}
-    
+
     header_json = json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8")
     payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    
+
     encoded_header = _base64url_encode(header_json)
     encoded_payload = _base64url_encode(payload_json)
-    
+
     signing_input = f"{encoded_header}.{encoded_payload}".encode("ascii")
     signature = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
     encoded_signature = _base64url_encode(signature)
-    
+
     return f"{encoded_header}.{encoded_payload}.{encoded_signature}"
 
 # Test database URL (in-memory SQLite for tests)
@@ -92,15 +91,15 @@ async def test_engine() -> AsyncGenerator[AsyncEngine, None]:
         poolclass=StaticPool,
         echo=False,
     )
-    
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
+
     yield engine
-    
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
-    
+
     await engine.dispose()
 
 @pytest_asyncio.fixture(scope="function")
@@ -113,7 +112,7 @@ async def db_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, N
         autocommit=False,
         autoflush=False,
     )
-    
+
     async with async_session_factory() as session:
         yield session
         await session.rollback()
@@ -121,7 +120,7 @@ async def db_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, N
 @pytest_asyncio.fixture(scope="function")
 async def client(test_engine: AsyncEngine) -> AsyncGenerator[AsyncClient, None]:
     """Create a test HTTP client with overridden dependencies."""
-    
+
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
         async_session_factory = async_sessionmaker(
             test_engine,
@@ -139,11 +138,11 @@ async def client(test_engine: AsyncEngine) -> AsyncGenerator[AsyncClient, None]:
                 raise
 
     app.dependency_overrides[get_db] = override_get_db
-    
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
-    
+
     app.dependency_overrides.clear()
 
 @pytest.fixture
@@ -215,7 +214,7 @@ def mock_gemini() -> Generator[MagicMock, None, None]:
         mock_instance.generate_with_retry.return_value = "Mocked retry response"
         mock_instance.generate_structured.return_value = {"mocked_key": "mocked_value"}
         mock_instance.generate_with_vision.return_value = {"extracted_text": "Mocked OCR text"}
-        
+
         # Patch the singleton getter
         with patch("src.app.services.gemini_service.get_gemini_service", return_value=mock_instance):
             yield mock_instance
@@ -226,11 +225,11 @@ def mock_blob_storage() -> Generator[MagicMock, None, None]:
     """Mock Blob Storage service to prevent actual file I/O."""
     with patch("src.app.services.blob_storage_service.LocalBlobStorageService") as mock_cls:
         mock_instance = mock_cls.return_value
-        
+
         # Setup AsyncMock for async methods
         mock_instance.upload_from_bytes = AsyncMock(return_value=MagicMock(
-            success=True, 
-            blob_id="mock_blob_123", 
+            success=True,
+            blob_id="mock_blob_123",
             file_uri="/api/v1/blobs/mock_blob_123",
             file_size=1024,
             mime_type="image/jpeg",
@@ -238,8 +237,8 @@ def mock_blob_storage() -> Generator[MagicMock, None, None]:
             error_message=None
         ))
         mock_instance.upload_from_url = AsyncMock(return_value=MagicMock(
-            success=True, 
-            blob_id="mock_blob_from_url_123", 
+            success=True,
+            blob_id="mock_blob_from_url_123",
             file_uri="/api/v1/blobs/mock_blob_from_url_123",
             file_size=2048,
             mime_type="application/pdf",
@@ -250,19 +249,20 @@ def mock_blob_storage() -> Generator[MagicMock, None, None]:
         mock_instance.delete_blob = AsyncMock(return_value=True)
         mock_instance.get_blob_uri = MagicMock(return_value="/api/v1/blobs/mock_blob_123")
         mock_instance.blob_exists = AsyncMock(return_value=True)
-        
+
         yield mock_instance
 
 @pytest_asyncio.fixture(scope="function", autouse=True)
 async def setup_admin_user(db_session: AsyncSession) -> None:
     """Ensure an admin user exists for the default auth_headers token."""
-    from src.app.models.user import User
-    from src.app.models.enums import UserRole
     from sqlalchemy import select
-    
+
+    from src.app.models.enums import UserRole
+    from src.app.models.user import User
+
     result = await db_session.execute(select(User).where(User.phone == "+919999999999"))
     user = result.scalar_one_or_none()
-    
+
     if not user:
         user = User(
             phone="+919999999999",

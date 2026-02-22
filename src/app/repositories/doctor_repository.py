@@ -5,7 +5,7 @@ Data access layer for doctor entities using SQLAlchemy 2.0 async patterns.
 Follows the Repository pattern for clean separation of concerns.
 """
 import logging
-from typing import Sequence
+from collections.abc import Sequence
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,11 +24,11 @@ class DoctorRepository:
     Provides CRUD operations and query methods following
     SQLAlchemy 2.0 async patterns.
     """
-    
+
     def __init__(self, session: AsyncSession) -> None:
         """Initialize with database session."""
         self.session = session
-    
+
     async def create(self, data: DoctorCreate) -> Doctor:
         """
         Create a new doctor record.
@@ -46,7 +46,7 @@ class DoctorRepository:
         existing = await self.get_by_email(data.email)
         if existing:
             raise DoctorAlreadyExistsError(data.email)
-        
+
         # Create doctor entity with qualifications as JSON
         doctor = Doctor(
             # Block 1
@@ -106,47 +106,47 @@ class DoctorRepository:
             resume_url=data.resume_url,
             raw_extraction_data=data.raw_extraction_data,
         )
-        
+
         self.session.add(doctor)
         await self.session.commit()
         await self.session.refresh(doctor)
-        
+
         logger.info(f"Created doctor: {doctor.id} ({doctor.email})")
-        
+
         return doctor
-    
+
     async def get_by_id(self, doctor_id: int) -> Doctor | None:
         """Get doctor by ID."""
         query = select(Doctor).where(Doctor.id == doctor_id)
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
-    
+
     async def get_by_id_or_raise(self, doctor_id: int) -> Doctor:
         """Get doctor by ID or raise NotFoundError."""
         doctor = await self.get_by_id(doctor_id)
         if not doctor:
             raise DoctorNotFoundError(doctor_id=doctor_id)
         return doctor
-    
+
     async def get_by_email(self, email: str) -> Doctor | None:
         """Get doctor by email address."""
         query = select(Doctor).where(Doctor.email == email.lower())
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
-    
+
     async def get_by_phone_number(self, phone_number: str) -> Doctor | None:
         """Get doctor by phone number (stored as string with +91 prefix)."""
         # Normalize: ensure it has +91 prefix (same as create_from_phone)
         normalized = phone_number.strip()
         if not normalized:
             return None
-        
+
         # Extract only digits
         digits_only = ''.join(c for c in normalized if c.isdigit())
-        
+
         # Handle different input formats:
         # - "9988776655" -> "+919988776655"
-        # - "919988776655" -> "+919988776655" 
+        # - "919988776655" -> "+919988776655"
         # - "+919988776655" -> "+919988776655"
         if digits_only.startswith('91') and len(digits_only) == 12:
             # Already has country code
@@ -154,17 +154,17 @@ class DoctorRepository:
         else:
             # Add +91 for Indian numbers
             normalized = '+91' + digits_only
-        
+
         query = select(Doctor).where(Doctor.phone == normalized)
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
-    
+
     async def get_by_registration_number(self, reg_number: str) -> Doctor | None:
         """Get doctor by medical registration number."""
         query = select(Doctor).where(Doctor.medical_registration_number == reg_number)
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
-    
+
     async def get_all(
         self,
         skip: int = 0,
@@ -188,27 +188,27 @@ class DoctorRepository:
             .offset(skip)
             .limit(limit)
         )
-        
+
         if specialization:
             query = query.where(
                 Doctor.primary_specialization.ilike(f"%{specialization}%")
             )
-        
+
         result = await self.session.execute(query)
         return result.scalars().all()
-    
+
     async def count(self, specialization: str | None = None) -> int:
         """Count total doctors with optional filtering."""
         query = select(func.count(Doctor.id))
-        
+
         if specialization:
             query = query.where(
                 Doctor.primary_specialization.ilike(f"%{specialization}%")
             )
-        
+
         result = await self.session.execute(query)
         return result.scalar_one()
-    
+
     async def update(self, doctor_id: int, data: DoctorUpdate) -> Doctor:
         """
         Update an existing doctor record.
@@ -224,40 +224,40 @@ class DoctorRepository:
             DoctorNotFoundError: If doctor doesn't exist
         """
         doctor = await self.get_by_id_or_raise(doctor_id)
-        
+
         # Update only provided fields
         update_data = data.model_dump(exclude_unset=True, exclude_none=True)
-        
+
         # Handle nested objects - practice_locations
         if "practice_locations" in update_data:
             update_data["practice_locations"] = [
                 loc.model_dump() if isinstance(loc, PracticeLocationBase) else loc
                 for loc in update_data["practice_locations"]
             ]
-        
+
         # Qualifications are stored as list[str] - no conversion needed
-        
+
         # Map schema field names to model field names
         field_mapping = {
             "awards_recognition": "achievements",
             "memberships": "professional_memberships",
             "phone_number": "phone",
         }
-        
+
         # Update fields
         for field, value in update_data.items():
             model_field = field_mapping.get(field, field)
             if hasattr(doctor, model_field):
                 setattr(doctor, model_field, value)
-        
-        
+
+
         await self.session.commit()
         await self.session.refresh(doctor)
-        
+
         logger.info(f"Updated doctor: {doctor_id}")
-        
+
         return doctor
-    
+
     async def create_from_phone(
         self,
         phone_number: str,
@@ -282,7 +282,7 @@ class DoctorRepository:
         if not normalized_phone.startswith('+'):
             # Add +91 for Indian numbers
             normalized_phone = '+91' + ''.join(c for c in normalized_phone if c.isdigit())
-        
+
         # Create minimal doctor record
         # Using phone number as temporary placeholder for required fields
         # Other fields (primary_specialization, medical_registration_number, etc.)
@@ -294,13 +294,13 @@ class DoctorRepository:
             email=f"pending_{normalized_phone.replace('+', '')}@placeholder.local",  # Temporary placeholder
             role=role,
         )
-        
+
         self.session.add(doctor)
         await self.session.commit()
         await self.session.refresh(doctor)
-        
+
         logger.info(f"Created doctor from phone: {doctor.id} ({normalized_phone})")
-        
+
         return doctor
 
     async def create_from_email(
@@ -328,7 +328,7 @@ class DoctorRepository:
         name_parts = name.strip().split(" ", 1) if name else ["", ""]
         first_name = name_parts[0] if len(name_parts) > 0 else ""
         last_name = name_parts[1] if len(name_parts) > 1 else ""
-        
+
         doctor = Doctor(
             email=email.lower(),
             first_name=first_name,
@@ -336,15 +336,15 @@ class DoctorRepository:
             phone="",  # Will be filled during onboarding
             role=role,
         )
-        
+
         self.session.add(doctor)
         await self.session.commit()
         await self.session.refresh(doctor)
-        
+
         logger.info(f"Created doctor from email: {doctor.id} ({email})")
-        
+
         return doctor
-    
+
     async def delete(self, doctor_id: int) -> bool:
         """
         Delete a doctor record.
@@ -358,14 +358,14 @@ class DoctorRepository:
         doctor = await self.get_by_id(doctor_id)
         if not doctor:
             return False
-        
+
         await self.session.delete(doctor)
         await self.session.commit()
-        
+
         logger.info(f"Deleted doctor: {doctor_id}")
-        
+
         return True
-    
+
     async def delete_or_raise(self, doctor_id: int) -> None:
         """Delete a doctor or raise NotFoundError."""
         deleted = await self.delete(doctor_id)

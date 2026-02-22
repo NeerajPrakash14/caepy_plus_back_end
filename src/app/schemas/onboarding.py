@@ -15,6 +15,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+
 class OnboardingStatusEnum(str, Enum):
     """Public enum for onboarding status used by APIs."""
 

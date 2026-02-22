@@ -11,13 +11,13 @@ backwards compatibility with older clients.
 SECURITY: The mock OTP endpoint is ONLY available in development mode.
 In production, use the real OTP flow via /auth/otp/request and /auth/otp/verify.
 """
-from datetime import datetime, timedelta, timezone
-from typing import Annotated
 import base64
 import hashlib
 import hmac
 import json
 import os
+from datetime import UTC, datetime, timedelta
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -109,7 +109,7 @@ def _create_access_token(
         TokenResponse with access_token, token_type, and expires_in
     """
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expire_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     expire = now + expire_delta
 
@@ -216,8 +216,8 @@ async def mimic_admin_login(
     db: Annotated[any, Depends(get_db)],
 ) -> GenericResponse[AdminLoginResponse]:
     """Mimic admin login - requires existing admin user."""
-    from ....repositories.user_repository import UserRepository
     from ....models.enums import UserRole
+    from ....repositories.user_repository import UserRepository
 
     # Security check: Only allow in development
     if not _is_dev_environment():

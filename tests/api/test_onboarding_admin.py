@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
 import pytest
 
 if TYPE_CHECKING:
@@ -70,7 +71,7 @@ async def test_get_details(client: AsyncClient, auth_headers: dict[str, str], sa
     doctor_id = sample_identity["doctor_id"]
     # Upsert first to ensure it's there
     await client.put(f"/api/v1/onboarding-admin/details/{doctor_id}", json={"specialty": "Test"}, headers=auth_headers)
-    
+
     response = await client.get(f"/api/v1/onboarding-admin/details/{doctor_id}", headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["doctor_id"] == doctor_id
@@ -106,7 +107,7 @@ async def test_list_media(client: AsyncClient, auth_headers: dict[str, str], sam
         "mime_type": "image/jpeg"
     }
     await client.post(f"/api/v1/onboarding-admin/media/{doctor_id}", json=payload, headers=auth_headers)
-    
+
     response = await client.get(f"/api/v1/onboarding-admin/media/{doctor_id}", headers=auth_headers)
     assert response.status_code == 200
     assert len(response.json()) > 0
@@ -126,7 +127,7 @@ async def test_delete_media(client: AsyncClient, auth_headers: dict[str, str], s
     }
     create_resp = await client.post(f"/api/v1/onboarding-admin/media/{doctor_id}", json=payload, headers=auth_headers)
     media_id = create_resp.json()["media_id"]
-    
+
     response = await client.delete(f"/api/v1/onboarding-admin/media/{media_id}", headers=auth_headers)
     assert response.status_code == 204
 
@@ -140,11 +141,11 @@ async def test_status_history(client: AsyncClient, auth_headers: dict[str, str],
         "changed_by": "1",
         "reason": "Looking good"
     }
-    
+
     # Log status
     post_resp = await client.post(f"/api/v1/onboarding-admin/status-history/{doctor_id}", json=payload, headers=auth_headers)
     assert post_resp.status_code == 201
-    
+
     # Get history
     get_resp = await client.get(f"/api/v1/onboarding-admin/status-history/{doctor_id}", headers=auth_headers)
     assert get_resp.status_code == 200

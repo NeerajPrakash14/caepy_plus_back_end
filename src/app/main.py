@@ -3,8 +3,8 @@ Doctor Onboarding Service - Main Application.
 """
 import logging
 import sys
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 import structlog
 from fastapi import FastAPI, Request
@@ -16,16 +16,17 @@ from .api.v1 import router as v1_router
 from .core.config import get_settings
 from .core.exceptions import AppException
 from .core.responses import ErrorDetail, ErrorResponse, ResponseMeta
-from .db.session import close_db, init_db, get_db_manager
+from .db.session import close_db, get_db_manager
+
 
 # Configure structured logging
 def configure_logging() -> None:
     """Configure structured logging with structlog."""
     settings = get_settings()
-    
+
     # Set log level
     log_level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
-    
+
     # Configure structlog
     structlog.configure(
         processors=[
@@ -39,7 +40,7 @@ def configure_logging() -> None:
         logger_factory=structlog.PrintLoggerFactory(),
         cache_logger_on_first_use=True,
     )
-    
+
     # Also configure standard logging for third-party libraries
     logging.basicConfig(
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -58,14 +59,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     - Shutdown: Close database connections, cleanup sessions
     """
     import asyncio
+
     from .services.voice_service import get_voice_service
-    
+
     settings = get_settings()
     logger = structlog.get_logger()
-    
+
     # Background task for session cleanup
     cleanup_task: asyncio.Task | None = None
-    
+
     async def periodic_session_cleanup() -> None:
         """Cleanup expired voice sessions every 5 minutes."""
         while True:
@@ -79,7 +81,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 break
             except Exception as e:
                 logger.error(f"Session cleanup error: {e}")
-    
+
 
     # Startup
     logger.info(
@@ -88,27 +90,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         version=settings.APP_VERSION,
         environment=settings.APP_ENV,
     )
-    
+
     configure_logging()
-    
+
     # Initialize PostgreSQL database
     db_manager = get_db_manager()
     await db_manager.create_tables()
-    
+
     # Check database health
     health = await db_manager.health_check()
     logger.info("Database health check", postgres=health)
-    
+
     # Start background cleanup task
     cleanup_task = asyncio.create_task(periodic_session_cleanup())
-    
+
     logger.info("Application started successfully")
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down application")
-    
+
     # Cancel background tasks
     if cleanup_task:
         cleanup_task.cancel()
@@ -116,10 +118,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await cleanup_task
         except asyncio.CancelledError:
             pass
-    
+
     # Close database connections
     await close_db()
-    
+
     logger.info("Application shutdown complete")
 
 def create_application() -> FastAPI:
@@ -133,7 +135,7 @@ def create_application() -> FastAPI:
     - OpenAPI documentation
     """
     settings = get_settings()
-    
+
     # OpenAPI Tags metadata for better organization
     tags_metadata = [
         {
@@ -153,7 +155,7 @@ def create_application() -> FastAPI:
             "description": "🎤 **Voice-Based Registration** - Natural language conversation interface for collecting doctor information through speech",
         },
     ]
-    
+
     app = FastAPI(
         title=settings.APP_NAME,
         version=settings.APP_VERSION,
@@ -247,7 +249,7 @@ Made with ❤️ for healthcare professionals
             "email": "support@example.com",
         },
     )
-    
+
     # Configure CORS
     app.add_middleware(
         CORSMiddleware,
@@ -256,13 +258,13 @@ Made with ❤️ for healthcare professionals
         allow_methods=settings.cors_methods_list,
         allow_headers=["*"],
     )
-    
+
     # Register exception handlers
     register_exception_handlers(app)
-    
+
     # Include API routers
     app.include_router(v1_router)
-    
+
     # Root endpoint
     @app.get("/", include_in_schema=False)
     async def root() -> dict:
@@ -273,13 +275,13 @@ Made with ❤️ for healthcare professionals
             "docs": "/docs",
             "health": "/api/v1/health",
         }
-    
+
     return app
 
 def register_exception_handlers(app: FastAPI) -> None:
     """Register global exception handlers."""
     logger = structlog.get_logger()
-    
+
     @app.exception_handler(AppException)
     async def app_exception_handler(request: Request, exc: AppException) -> ORJSONResponse:
         """Handle application-specific exceptions."""
@@ -289,7 +291,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             message=exc.message,
             path=str(request.url),
         )
-        
+
         return ORJSONResponse(
             status_code=exc.status_code,
             content=ErrorResponse(
@@ -301,7 +303,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                 meta=ResponseMeta(),
             ).model_dump(),
         )
-    
+
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(
         request: Request,
@@ -313,7 +315,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             errors=exc.errors(),
             path=str(request.url),
         )
-        
+
         # Format validation errors
         validation_errors = []
         for error in exc.errors():
@@ -322,7 +324,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "message": error["msg"],
                 "type": error["type"],
             })
-        
+
         return ORJSONResponse(
             status_code=422,
             content=ErrorResponse(
@@ -334,7 +336,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                 meta=ResponseMeta(),
             ).model_dump(),
         )
-    
+
     @app.exception_handler(Exception)
     async def generic_exception_handler(
         request: Request,
@@ -342,16 +344,16 @@ def register_exception_handlers(app: FastAPI) -> None:
     ) -> ORJSONResponse:
         """Handle unexpected exceptions."""
         settings = get_settings()
-        
+
         logger.exception(
             "Unhandled exception",
             error=str(exc),
             path=str(request.url),
         )
-        
+
         # Don't expose internal errors in production
         message = str(exc) if settings.DEBUG else "An unexpected error occurred"
-        
+
         return ORJSONResponse(
             status_code=500,
             content=ErrorResponse(

@@ -3,9 +3,8 @@
 Admin endpoints for managing configurable voice onboarding blocks and fields.
 """
 import logging
-from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from ....core.responses import GenericResponse
@@ -132,17 +131,17 @@ async def get_voice_config(
 ) -> GenericResponse[VoiceConfigResponse]:
     """Get the complete voice onboarding configuration."""
     repo = VoiceConfigRepository(db)
-    
+
     blocks = await repo.list_blocks(active_only=active_only)
-    
+
     # Convert to response format
     block_responses = []
     total_fields = 0
-    
+
     for block in blocks:
         fields = [f for f in block.fields if (not active_only or f.is_active)]
         total_fields += len(fields)
-        
+
         block_responses.append(VoiceBlockResponse(
             id=block.id,
             block_number=block.block_number,
@@ -174,7 +173,7 @@ async def get_voice_config(
                 display_order=f.display_order,
             ) for f in fields],
         ))
-    
+
     return GenericResponse(
         message="Voice configuration retrieved",
         data=VoiceConfigResponse(
@@ -196,14 +195,14 @@ async def get_block(
 ) -> GenericResponse[VoiceBlockResponse]:
     """Get a specific block by number."""
     repo = VoiceConfigRepository(db)
-    
+
     block = await repo.get_block_by_number(block_number)
     if not block:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Block {block_number} not found",
         )
-    
+
     return GenericResponse(
         message="Block retrieved",
         data=VoiceBlockResponse(
@@ -252,7 +251,7 @@ async def create_block(
 ) -> GenericResponse[VoiceBlockResponse]:
     """Create a new voice onboarding block."""
     repo = VoiceConfigRepository(db)
-    
+
     block = await repo.create_block(
         block_number=payload.block_number,
         block_name=payload.block_name,
@@ -264,9 +263,9 @@ async def create_block(
         is_active=payload.is_active,
         display_order=payload.display_order,
     )
-    
+
     logger.info(f"Created voice block: {block.block_number} - {block.block_name}")
-    
+
     return GenericResponse(
         message="Block created successfully",
         data=VoiceBlockResponse(
@@ -297,18 +296,18 @@ async def update_block(
 ) -> GenericResponse[VoiceBlockResponse]:
     """Update a voice onboarding block."""
     repo = VoiceConfigRepository(db)
-    
+
     update_data = payload.model_dump(exclude_unset=True)
     block = await repo.update_block(block_id, **update_data)
-    
+
     if not block:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Block {block_id} not found",
         )
-    
+
     logger.info(f"Updated voice block: {block_id}")
-    
+
     return GenericResponse(
         message="Block updated successfully",
         data=VoiceBlockResponse(
@@ -356,16 +355,16 @@ async def delete_block(
 ) -> GenericResponse[dict]:
     """Delete a voice onboarding block."""
     repo = VoiceConfigRepository(db)
-    
+
     deleted = await repo.delete_block(block_id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Block {block_id} not found",
         )
-    
+
     logger.info(f"Deleted voice block: {block_id}")
-    
+
     return GenericResponse(
         message="Block deleted successfully",
         data={"deleted": True, "id": block_id},
@@ -388,7 +387,7 @@ async def create_field(
 ) -> GenericResponse[VoiceFieldResponse]:
     """Create a new voice onboarding field."""
     repo = VoiceConfigRepository(db)
-    
+
     field = await repo.create_field(
         block_id=payload.block_id,
         field_name=payload.field_name,
@@ -407,9 +406,9 @@ async def create_field(
         is_active=payload.is_active,
         display_order=payload.display_order,
     )
-    
+
     logger.info(f"Created voice field: {field.field_name}")
-    
+
     return GenericResponse(
         message="Field created successfully",
         data=VoiceFieldResponse(
@@ -446,18 +445,18 @@ async def update_field(
 ) -> GenericResponse[VoiceFieldResponse]:
     """Update a voice onboarding field."""
     repo = VoiceConfigRepository(db)
-    
+
     update_data = payload.model_dump(exclude_unset=True)
     field = await repo.update_field(field_id, **update_data)
-    
+
     if not field:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Field {field_id} not found",
         )
-    
+
     logger.info(f"Updated voice field: {field_id}")
-    
+
     return GenericResponse(
         message="Field updated successfully",
         data=VoiceFieldResponse(
@@ -493,16 +492,16 @@ async def delete_field(
 ) -> GenericResponse[dict]:
     """Delete a voice onboarding field."""
     repo = VoiceConfigRepository(db)
-    
+
     deleted = await repo.delete_field(field_id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Field {field_id} not found",
         )
-    
+
     logger.info(f"Deleted voice field: {field_id}")
-    
+
     return GenericResponse(
         message="Field deleted successfully",
         data={"deleted": True, "id": field_id},
@@ -520,9 +519,9 @@ async def get_field_config(
 ) -> GenericResponse[dict]:
     """Get field configuration for voice service integration."""
     repo = VoiceConfigRepository(db)
-    
+
     config = await repo.get_field_config_dict()
-    
+
     return GenericResponse(
         message="Field configuration retrieved",
         data=config,
