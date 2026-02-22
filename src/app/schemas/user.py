@@ -61,6 +61,12 @@ class UserCreate(BaseModel):
         if len(digits) < 10:
             raise ValueError("Phone number must have at least 10 digits")
         return v
+        
+    @field_validator("doctor_id")
+    @classmethod
+    def validate_doctor_id(cls, v: int | None) -> int | None:
+        """Convert 0 to None for doctor_id to prevent foreign key errors."""
+        return None if v == 0 else v
 
 
 class UserUpdate(BaseModel):
@@ -92,6 +98,12 @@ class UserUpdate(BaseModel):
             if v not in allowed:
                 raise ValueError(f"Role must be one of: {', '.join(allowed)}")
         return v
+        
+    @field_validator("doctor_id")
+    @classmethod
+    def validate_doctor_id(cls, v: int | None) -> int | None:
+        """Convert 0 to None for doctor_id to prevent foreign key errors."""
+        return None if v == 0 else v
 
 
 class UserRoleUpdate(BaseModel):
