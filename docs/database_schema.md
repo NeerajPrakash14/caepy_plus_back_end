@@ -3,7 +3,7 @@
 **Project:** Doctor Onboarding Smart-Fill API  
 **Database:** PostgreSQL (Production) / SQLite (Development)  
 **ORM:** SQLAlchemy 2.0 (Async)  
-**Generated:** 2026-01-19  
+**Last Updated:** 2026-02-22  
 
 ---
 
@@ -24,9 +24,18 @@ This document provides a comprehensive reference for all database tables, column
 2. [Hospital Management Tables](#hospital-management-tables)
    - [hospitals](#6-hospitals)
    - [doctor_hospital_affiliations](#7-doctor_hospital_affiliations)
-3. [Enumerations](#enumerations)
-4. [Relationships](#relationships)
-5. [Indexes](#indexes)
+3. [RBAC & Authentication Tables](#rbac--authentication-tables)
+   - [users](#8-users)
+4. [Content & Configuration Tables](#content--configuration-tables)
+   - [testimonials](#9-testimonials)
+5. [Voice Onboarding Configuration Tables](#voice-onboarding-configuration-tables)
+   - [voice_onboarding_blocks](#10-voice_onboarding_blocks)
+   - [voice_onboarding_fields](#11-voice_onboarding_fields)
+6. [Legacy Tables](#legacy-tables)
+   - [doctors](#12-doctors)
+7. [Enumerations](#enumerations)
+8. [Relationships](#relationships)
+9. [Indexes](#indexes)
 
 ---
 
@@ -40,7 +49,7 @@ This document provides a comprehensive reference for all database tables, column
 
 | Column Name | Data Type | Constraints | Default | Description |
 |------------|-----------|-------------|---------|-------------|
-| `id` | `VARCHAR(36)` | PRIMARY KEY | UUID | Unique identifier (UUID v4) |
+| `id` | `VARCHAR(36)` | PRIMARY KEY | UUID v4 | Unique identifier |
 | `doctor_id` | `BIGINT` | UNIQUE, NOT NULL, AUTO INCREMENT | Auto | Numeric doctor ID for references |
 | `title` | `ENUM` | NULLABLE | NULL | Doctor title: 'dr', 'prof', 'prof.dr' |
 | `first_name` | `VARCHAR(100)` | NOT NULL | - | Doctor's first name |
@@ -64,7 +73,7 @@ This document provides a comprehensive reference for all database tables, column
 - Index: `doctor_id`, `email`
 
 **Relationships:**
-- ONE-TO-ONE with `doctor_details` (detail_id)
+- ONE-TO-ONE with `doctor_details` (via doctor_id)
 - ONE-TO-MANY with `doctor_media` (media records)
 - ONE-TO-MANY with `doctor_status_history` (audit trail)
 
@@ -74,31 +83,67 @@ This document provides a comprehensive reference for all database tables, column
 
 **Purpose:** Comprehensive professional information and credentials.
 
-**Description:** Stores detailed professional data including specialization, qualifications, experience, and practice information. All JSON fields default to empty arrays/objects.
+**Description:** Stores detailed professional data organized into 6 blocks matching the voice onboarding questionnaire, plus legacy fields for backward compatibility. All JSON fields default to empty arrays/objects.
 
 | Column Name | Data Type | Constraints | Default | Description |
 |------------|-----------|-------------|---------|-------------|
-| `detail_id` | `VARCHAR(36)` | PRIMARY KEY | UUID | Unique identifier |
-| `doctor_id` | `BIGINT` | FOREIGN KEY, UNIQUE, NOT NULL | - | References doctor_identity.doctor_id |
+| `detail_id` | `VARCHAR(36)` | PRIMARY KEY | UUID v4 | Unique identifier |
+| `doctor_id` | `BIGINT` | FK, UNIQUE, NOT NULL | - | References doctor_identity.doctor_id |
+| **Block 1: Professional Identity** |||||
+| `full_name` | `VARCHAR(200)` | NULLABLE | NULL | Doctor's full name |
+| `specialty` | `VARCHAR(100)` | NULLABLE | NULL | Primary specialty (new field) |
+| `primary_practice_location` | `VARCHAR(100)` | NULLABLE | NULL | Primary city/location |
+| `centres_of_practice` | `JSON` | NOT NULL | [] | Array of practice centre names |
+| `years_of_clinical_experience` | `INTEGER` | NULLABLE | NULL | Total clinical experience years |
+| `years_post_specialisation` | `INTEGER` | NULLABLE | NULL | Years since specialisation |
+| **Block 2: Credentials & Trust Markers** |||||
+| `year_of_mbbs` | `INTEGER` | NULLABLE | NULL | Year of MBBS completion |
+| `year_of_specialisation` | `INTEGER` | NULLABLE | NULL | Year of specialisation completion |
+| `fellowships` | `JSON` | NOT NULL | [] | Array of fellowship details |
+| `qualifications` | `JSON` | NOT NULL | [] | Array of qualifications |
+| `professional_memberships` | `JSON` | NOT NULL | [] | Array of professional body memberships |
+| `awards_academic_honours` | `JSON` | NOT NULL | [] | Array of awards and honours |
+| **Block 3: Clinical Focus & Expertise** |||||
+| `areas_of_clinical_interest` | `JSON` | NOT NULL | [] | Array of clinical interest areas |
+| `practice_segments` | `VARCHAR(50)` | NULLABLE | NULL | Practice segment type |
+| `conditions_commonly_treated` | `JSON` | NOT NULL | [] | Array of commonly treated conditions |
+| `conditions_known_for` | `JSON` | NOT NULL | [] | Array of conditions known for |
+| `conditions_want_to_treat_more` | `JSON` | NOT NULL | [] | Array of conditions to treat more |
+| **Block 4: The Human Side** |||||
+| `training_experience` | `JSON` | NOT NULL | [] | Array of training experiences |
+| `motivation_in_practice` | `JSON` | NOT NULL | [] | Array of practice motivations |
+| `unwinding_after_work` | `JSON` | NOT NULL | [] | Array of unwinding activities |
+| `recognition_identity` | `JSON` | NOT NULL | [] | Array of recognition/identity items |
+| `quality_time_interests` | `JSON` | NOT NULL | [] | Array of quality time interests |
+| `quality_time_interests_text` | `TEXT` | NULLABLE | NULL | Free-text quality time description |
+| `professional_achievement` | `TEXT` | NULLABLE | NULL | Key professional achievement |
+| `personal_achievement` | `TEXT` | NULLABLE | NULL | Key personal achievement |
+| `professional_aspiration` | `TEXT` | NULLABLE | NULL | Professional aspiration |
+| `personal_aspiration` | `TEXT` | NULLABLE | NULL | Personal aspiration |
+| **Block 5: Patient Value & Choice Factors** |||||
+| `what_patients_value_most` | `TEXT` | NULLABLE | NULL | What patients value most |
+| `approach_to_care` | `TEXT` | NULLABLE | NULL | Approach to patient care |
+| `availability_philosophy` | `TEXT` | NULLABLE | NULL | Availability philosophy |
+| **Block 6: Content Seed** |||||
+| `content_seeds` | `JSON` | NOT NULL | [] | Array of content seed objects |
+| **Legacy/Compatibility Fields** |||||
 | `gender` | `VARCHAR(20)` | NULLABLE | NULL | Gender identification |
-| `speciality` | `VARCHAR(100)` | NULLABLE | NULL | Primary medical specialization |
+| `speciality` | `VARCHAR(100)` | NULLABLE | NULL | Primary medical specialization (legacy) |
 | `sub_specialities` | `JSON` | NOT NULL | [] | Array of sub-specializations |
 | `areas_of_expertise` | `JSON` | NOT NULL | [] | Array of expertise areas |
 | `registration_number` | `VARCHAR(100)` | UNIQUE, NULLABLE | NULL | Medical registration number |
 | `registration_year` | `INTEGER` | NULLABLE | NULL | Year of medical registration |
-| `registration_authority` | `VARCHAR(100)` | NULLABLE | NULL | Issuing authority (e.g., Medical Council) |
+| `registration_authority` | `VARCHAR(100)` | NULLABLE | NULL | Issuing authority |
 | `consultation_fee` | `FLOAT` | NULLABLE | NULL | Default consultation fee |
-| `years_of_experience` | `INTEGER` | NULLABLE | NULL | Total years practicing medicine |
-| `conditions_treated` | `JSON` | NOT NULL | [] | Array of medical conditions treated |
-| `procedures_performed` | `JSON` | NOT NULL | [] | Array of procedures/surgeries performed |
-| `age_groups_treated` | `JSON` | NOT NULL | [] | Array of age groups (pediatric, geriatric, etc.) |
-| `professional_memberships` | `JSON` | NOT NULL | [] | Array of professional body memberships |
+| `years_of_experience` | `INTEGER` | NULLABLE | NULL | Total years practicing |
+| `conditions_treated` | `JSON` | NOT NULL | [] | Array of conditions treated |
+| `procedures_performed` | `JSON` | NOT NULL | [] | Array of procedures performed |
+| `age_groups_treated` | `JSON` | NOT NULL | [] | Array of age groups treated |
 | `languages_spoken` | `JSON` | NOT NULL | [] | Array of languages |
-| `qualifications` | `JSON` | NOT NULL | [] | Array of objects: {degree, institution, year, specialization} |
 | `achievements` | `JSON` | NOT NULL | [] | Array of awards and recognitions |
 | `publications` | `JSON` | NOT NULL | [] | Array of research publications |
-| `practice_locations` | `JSON` | NOT NULL | [] | Array of practice locations (legacy, use affiliations instead) |
-| `external_links` | `JSON` | NOT NULL | {} | Object with social links: {linkedin, website, etc.} |
+| `practice_locations` | `JSON` | NOT NULL | [] | Array of practice locations (legacy) |
+| `external_links` | `JSON` | NOT NULL | {} | Object with social links |
 | `professional_overview` | `TEXT` | NULLABLE | NULL | Professional summary/bio |
 | `about_me` | `TEXT` | NULLABLE | NULL | Personal introduction |
 | `professional_tagline` | `TEXT` | NULLABLE | NULL | Short professional tagline |
@@ -115,27 +160,6 @@ This document provides a comprehensive reference for all database tables, column
 **Relationships:**
 - ONE-TO-ONE with `doctor_identity`
 
-**JSON Field Structures:**
-
-```json
-// qualifications example
-[
-  {
-    "degree": "MBBS",
-    "institution": "Harvard Medical School",
-    "year": 2010,
-    "specialization": "General Medicine"
-  }
-]
-
-// external_links example
-{
-  "linkedin": "https://linkedin.com/in/drsmith",
-  "website": "https://drsmith.com",
-  "twitter": "https://twitter.com/drsmith"
-}
-```
-
 ---
 
 ### 3. `doctor_media`
@@ -146,8 +170,8 @@ This document provides a comprehensive reference for all database tables, column
 
 | Column Name | Data Type | Constraints | Default | Description |
 |------------|-----------|-------------|---------|-------------|
-| `media_id` | `VARCHAR(36)` | PRIMARY KEY | UUID | Unique identifier |
-| `doctor_id` | `BIGINT` | FOREIGN KEY, NOT NULL | - | References doctor_identity.doctor_id |
+| `media_id` | `VARCHAR(36)` | PRIMARY KEY | UUID v4 | Unique identifier |
+| `doctor_id` | `BIGINT` | FK, NOT NULL | - | References doctor_identity.doctor_id |
 | `field_name` | `VARCHAR(100)` | NULLABLE | NULL | Form field name (e.g., 'profile_photo') |
 | `media_type` | `VARCHAR(50)` | NOT NULL | - | Type: 'image', 'document', 'video' |
 | `media_category` | `VARCHAR(50)` | NOT NULL | - | Category: 'profile_photo', 'certificate', etc. |
@@ -173,12 +197,12 @@ This document provides a comprehensive reference for all database tables, column
 
 **Purpose:** Audit trail for onboarding status changes.
 
-**Description:** Tracks all status transitions for compliance and debugging. Records who changed status, when, from where, and why.
+**Description:** Tracks all status transitions for compliance and debugging.
 
 | Column Name | Data Type | Constraints | Default | Description |
 |------------|-----------|-------------|---------|-------------|
-| `history_id` | `VARCHAR(36)` | PRIMARY KEY | UUID | Unique identifier |
-| `doctor_id` | `BIGINT` | FOREIGN KEY, NOT NULL | - | References doctor_identity.doctor_id |
+| `history_id` | `VARCHAR(36)` | PRIMARY KEY | UUID v4 | Unique identifier |
+| `doctor_id` | `BIGINT` | FK, NOT NULL | - | References doctor_identity.doctor_id |
 | `previous_status` | `ENUM` | NULLABLE | NULL | Status before change |
 | `new_status` | `ENUM` | NOT NULL | - | Status after change |
 | `changed_by` | `VARCHAR(36)` | NULLABLE | NULL | Admin user ID who made change |
@@ -201,34 +225,44 @@ This document provides a comprehensive reference for all database tables, column
 
 ### 5. `dropdown_options`
 
-**Purpose:** Configurable dropdown values for onboarding forms.
+**Purpose:** Enhanced configurable dropdown values for onboarding forms.
 
-**Description:** Stores custom dropdown options that aren't yet in any doctor's profile. Allows dynamic form customization without code changes.
+**Description:** Stores custom dropdown options with categories, verification status, and creator tracking. Supersedes the original simple dropdown_options table.
 
 | Column Name | Data Type | Constraints | Default | Description |
 |------------|-----------|-------------|---------|-------------|
-| `id` | `INTEGER` | PRIMARY KEY, AUTO INCREMENT | Auto | Unique identifier |
-| `field_name` | `VARCHAR(100)` | NOT NULL | - | Field identifier (e.g., 'speciality', 'degree') |
-| `value` | `VARCHAR(255)` | NOT NULL | - | Dropdown option value |
+| `id` | `VARCHAR(36)` | PRIMARY KEY | UUID v4 | Unique identifier |
+| `field_name` | `VARCHAR(100)` | NOT NULL | - | Field identifier (e.g., 'specialty', 'fellowships') |
+| `category` | `VARCHAR(50)` | NOT NULL | - | Field category (professional_identity, credentials, etc.) |
+| `value` | `VARCHAR(255)` | NOT NULL | - | Option value |
+| `display_label` | `VARCHAR(255)` | NULLABLE | NULL | Display text (if different from value) |
+| `description` | `TEXT` | NULLABLE | NULL | Option description |
+| `creator_type` | `VARCHAR(20)` | NOT NULL | 'system' | Who created: 'system', 'admin', 'doctor' |
+| `created_by_doctor_id` | `INTEGER` | NULLABLE | NULL | Doctor who created (if doctor-created) |
+| `is_active` | `BOOLEAN` | NOT NULL | TRUE | Active flag |
+| `is_verified` | `BOOLEAN` | NOT NULL | TRUE | Verification flag |
+| `display_order` | `INTEGER` | NOT NULL | 0 | Sort order |
 | `created_at` | `TIMESTAMP WITH TZ` | NOT NULL | UTC NOW | Record creation timestamp |
-| `updated_at` | `TIMESTAMP WITH TZ` | NOT NULL | UTC NOW | Record update timestamp |
+| `updated_at` | `TIMESTAMP WITH TZ` | NULLABLE | NULL | Record update timestamp |
 
 **Indexes:**
 - Primary Key: `id`
-- Index: `field_name`
+- Unique: `(field_name, value)`
+- Index: `field_name`, `category`, `(field_name, is_active)`
 
-**Example Use Cases:**
-- Add new medical specializations
-- Add new degree types
-- Add custom sub-specializations
-
-**Example Data:**
-```sql
-INSERT INTO dropdown_options (field_name, value) VALUES 
-  ('speciality', 'Interventional Cardiology'),
-  ('degree', 'DNB'),
-  ('sub_speciality', 'Pediatric Neurology');
-```
+**Supported Fields:**
+- `specialty` – Medical specializations
+- `primary_practice_location` – Cities/locations
+- `qualifications` – Degrees (MBBS, MD, etc.)
+- `fellowships` – Fellowship programs
+- `professional_memberships` – Professional associations
+- `languages_spoken` – Languages
+- `age_groups_treated` – Patient demographics
+- `practice_segments` – Practice types
+- `training_experience` – Training highlights
+- `motivation_in_practice` – Practice motivations
+- `unwinding_after_work` – Personal interests
+- `quality_time_interests` – Quality time activities
 
 ---
 
@@ -262,7 +296,7 @@ INSERT INTO dropdown_options (field_name, value) VALUES
 
 **Indexes:**
 - Primary Key: `id`
-- Index: `id`, `name`, `city`, `state`, `verification_status`
+- Index: `name`, `city`, `state`, `verification_status`
 - Composite: `(name, city)`, `(verification_status, is_active)`
 
 **Relationships:**
@@ -274,13 +308,13 @@ INSERT INTO dropdown_options (field_name, value) VALUES
 
 **Purpose:** Links doctors to hospitals with location-specific details.
 
-**Description:** Many-to-many relationship table storing doctor-specific information for each hospital affiliation (fees, schedule, designation).
+**Description:** Many-to-many relationship table storing doctor-specific information for each hospital affiliation.
 
 | Column Name | Data Type | Constraints | Default | Description |
 |------------|-----------|-------------|---------|-------------|
-| `id` | `VARCHAR(36)` | PRIMARY KEY | UUID | Unique identifier |
+| `id` | `VARCHAR(36)` | PRIMARY KEY | UUID v4 | Unique identifier |
 | `doctor_id` | `BIGINT` | NOT NULL | - | References doctor_identity.doctor_id |
-| `hospital_id` | `INTEGER` | FOREIGN KEY, NOT NULL | - | References hospitals.id |
+| `hospital_id` | `INTEGER` | FK, NOT NULL | - | References hospitals.id |
 | `consultation_fee` | `FLOAT` | NULLABLE | NULL | Consultation fee at this hospital |
 | `consultation_type` | `VARCHAR(100)` | NULLABLE | NULL | Type: 'In-person', 'Online', 'Both' |
 | `weekly_schedule` | `TEXT` | NULLABLE | NULL | Schedule at this hospital |
@@ -298,11 +332,234 @@ INSERT INTO dropdown_options (field_name, value) VALUES
 - Foreign Key: `hospital_id` → `hospitals.id` (CASCADE DELETE)
 
 **Constraints:**
-- UNIQUE: `(doctor_id, hospital_id)` - A doctor can only have one affiliation per hospital
+- UNIQUE: `(doctor_id, hospital_id)` – A doctor can only have one affiliation per hospital
 
 **Relationships:**
 - MANY-TO-ONE with `hospitals`
 - MANY-TO-ONE with `doctor_identity` (via doctor_id)
+
+---
+
+## RBAC & Authentication Tables
+
+### 8. `users`
+
+**Purpose:** RBAC user accounts for authentication and authorization.
+
+**Description:** Stores user accounts with role-based access control. Users can be linked to doctors for profile management.
+
+| Column Name | Data Type | Constraints | Default | Description |
+|------------|-----------|-------------|---------|-------------|
+| `id` | `SERIAL` | PRIMARY KEY | Auto | Unique identifier |
+| `phone` | `VARCHAR(20)` | UNIQUE, NOT NULL | - | Phone number (+91XXXXXXXXXX) |
+| `email` | `VARCHAR(255)` | UNIQUE, NULLABLE | NULL | Email address |
+| `role` | `VARCHAR(20)` | NOT NULL | 'user' | Role: 'admin', 'operational', 'user' |
+| `is_active` | `BOOLEAN` | NOT NULL | TRUE | Soft delete flag |
+| `doctor_id` | `INTEGER` | FK, NULLABLE | NULL | Link to doctor profile |
+| `created_at` | `TIMESTAMP WITH TZ` | NOT NULL | UTC NOW | Record creation timestamp |
+| `updated_at` | `TIMESTAMP WITH TZ` | NULLABLE | NULL | Record update timestamp |
+| `last_login_at` | `TIMESTAMP WITH TZ` | NULLABLE | NULL | Last login timestamp |
+
+**Indexes:**
+- Primary Key: `id`
+- Unique: `phone`, `email`
+- Index: `role`, `is_active`, `doctor_id`, `phone`
+- Composite: `(role, is_active)`, `(phone, is_active)`
+- Foreign Key: `doctor_id` → `doctors.id` (SET NULL on delete)
+
+**Role Definitions:**
+- `admin` – Full system access (all admin endpoints)
+- `operational` – Limited admin access (onboarding, voice config, dropdowns)
+- `user` – Regular user access (public endpoints only)
+
+---
+
+## Content & Configuration Tables
+
+### 9. `testimonials`
+
+**Purpose:** Doctor testimonials for homepage carousel.
+
+**Description:** Stores testimonial content displayed on the public homepage.
+
+| Column Name | Data Type | Constraints | Default | Description |
+|------------|-----------|-------------|---------|-------------|
+| `id` | `VARCHAR(36)` | PRIMARY KEY | UUID v4 | Unique identifier |
+| `doctor_name` | `VARCHAR(200)` | NOT NULL | - | Testimonial author name |
+| `specialty` | `VARCHAR(100)` | NULLABLE | NULL | Doctor's specialty |
+| `designation` | `VARCHAR(200)` | NULLABLE | NULL | Professional designation |
+| `hospital_name` | `VARCHAR(200)` | NULLABLE | NULL | Hospital affiliation |
+| `location` | `VARCHAR(100)` | NULLABLE | NULL | Location/city |
+| `comment` | `TEXT` | NOT NULL | - | Testimonial text |
+| `rating` | `INTEGER` | NULLABLE | NULL | Star rating |
+| `profile_image_url` | `TEXT` | NULLABLE | NULL | Profile image URL |
+| `is_active` | `BOOLEAN` | NOT NULL | TRUE | Display flag |
+| `display_order` | `INTEGER` | NOT NULL | 0 | Sort order |
+| `created_at` | `TIMESTAMP WITH TZ` | NOT NULL | UTC NOW | Record creation timestamp |
+| `updated_at` | `TIMESTAMP WITH TZ` | NOT NULL | UTC NOW | Record update timestamp |
+
+---
+
+## Voice Onboarding Configuration Tables
+
+### 10. `voice_onboarding_blocks`
+
+**Purpose:** Voice questionnaire block configuration.
+
+**Description:** Defines the 6-block structure of the voice onboarding questionnaire with AI prompts and progress tracking.
+
+| Column Name | Data Type | Constraints | Default | Description |
+|------------|-----------|-------------|---------|-------------|
+| `id` | `SERIAL` | PRIMARY KEY | Auto | Unique identifier |
+| `block_number` | `INTEGER` | UNIQUE, NOT NULL | - | Block sequence number (1-6) |
+| `block_name` | `VARCHAR(100)` | NOT NULL | - | Internal block name |
+| `display_name` | `VARCHAR(200)` | NOT NULL | - | User-facing block title |
+| `ai_prompt` | `TEXT` | NULLABLE | NULL | AI system prompt for this block |
+| `ai_disclaimer` | `TEXT` | NULLABLE | NULL | Disclaimer shown before AI interaction |
+| `completion_percentage` | `INTEGER` | NOT NULL | 0 | Progress % when completed |
+| `completion_message` | `VARCHAR(200)` | NULLABLE | NULL | Message shown on completion |
+| `is_active` | `BOOLEAN` | NOT NULL | TRUE | Active flag |
+| `display_order` | `INTEGER` | NOT NULL | 0 | Display sequence |
+| `created_at` | `TIMESTAMP WITH TZ` | NOT NULL | UTC NOW | Record creation timestamp |
+| `updated_at` | `TIMESTAMP WITH TZ` | NOT NULL | UTC NOW | Record update timestamp |
+
+**Block Structure:**
+- Block 1: Professional Identity (0–17%)
+- Block 2: Credentials & Trust Markers (17–33%)
+- Block 3: Clinical Focus & Expertise (33–50%)
+- Block 4: The Human Side (50–67%)
+- Block 5: Patient Value & Choice Factors (67–83%)
+- Block 6: Content Seeds (83–100%)
+
+---
+
+### 11. `voice_onboarding_fields`
+
+**Purpose:** Voice questionnaire field configuration.
+
+**Description:** Defines individual fields within each voice onboarding block, including validation rules and AI questions.
+
+| Column Name | Data Type | Constraints | Default | Description |
+|------------|-----------|-------------|---------|-------------|
+| `id` | `SERIAL` | PRIMARY KEY | Auto | Unique identifier |
+| `block_id` | `INTEGER` | FK, NOT NULL | - | References voice_onboarding_blocks.id |
+| `field_name` | `VARCHAR(100)` | UNIQUE, NOT NULL | - | Internal field name |
+| `display_name` | `VARCHAR(200)` | NOT NULL | - | User-facing field label |
+| `field_type` | `VARCHAR(50)` | NOT NULL | - | Type: text, number, select, multi_select, year, multi_entry |
+| `is_required` | `BOOLEAN` | NOT NULL | FALSE | Required validation |
+| `validation_regex` | `VARCHAR(500)` | NULLABLE | NULL | Regex pattern for validation |
+| `min_length` | `INTEGER` | NULLABLE | NULL | Minimum text length |
+| `max_length` | `INTEGER` | NULLABLE | NULL | Maximum text length |
+| `min_value` | `INTEGER` | NULLABLE | NULL | Minimum numeric value |
+| `max_value` | `INTEGER` | NULLABLE | NULL | Maximum numeric value |
+| `max_selections` | `INTEGER` | NULLABLE | NULL | Max selections for multi_select |
+| `options` | `JSON` | NULLABLE | NULL | Options for select/multi_select |
+| `ai_question` | `TEXT` | NULLABLE | NULL | AI question prompt |
+| `ai_followup` | `TEXT` | NULLABLE | NULL | AI follow-up prompt |
+| `is_active` | `BOOLEAN` | NOT NULL | TRUE | Active flag |
+| `display_order` | `INTEGER` | NOT NULL | 0 | Display sequence within block |
+| `created_at` | `TIMESTAMP WITH TZ` | NOT NULL | UTC NOW | Record creation timestamp |
+| `updated_at` | `TIMESTAMP WITH TZ` | NOT NULL | UTC NOW | Record update timestamp |
+
+**Indexes:**
+- Primary Key: `id`
+- Unique: `field_name`
+- Foreign Key: `block_id` → `voice_onboarding_blocks.id` (CASCADE DELETE)
+
+---
+
+## Legacy Tables
+
+### 12. `doctors`
+
+**Purpose:** Legacy main doctor entity from initial implementation.
+
+**Description:** Original doctor table with comprehensive fields including the 6-block questionnaire data. Used alongside the onboarding tables. Linked to the `users` table via an optional reverse relationship.
+
+| Column Name | Data Type | Constraints | Default | Description |
+|------------|-----------|-------------|---------|-------------|
+| `id` | `SERIAL` | PRIMARY KEY | Auto | Unique identifier |
+| `title` | `VARCHAR(20)` | NULLABLE | NULL | Dr., Prof., Prof. Dr. |
+| `gender` | `VARCHAR(20)` | NULLABLE | NULL | Gender |
+| `first_name` | `VARCHAR(100)` | NOT NULL | - | First name |
+| `last_name` | `VARCHAR(100)` | NOT NULL | - | Last name |
+| `email` | `VARCHAR(100)` | UNIQUE, NOT NULL | - | Email address |
+| `phone` | `VARCHAR(20)` | UNIQUE, NULLABLE | NULL | Phone number |
+| `role` | `VARCHAR(20)` | NOT NULL | 'user' | Role: admin, operational, user |
+| `onboarding_status` | `VARCHAR(20)` | NOT NULL | 'pending' | Status: pending, submitted, verified, rejected |
+| **Block 1: Professional Identity** |||||
+| `full_name` | `VARCHAR(200)` | NULLABLE | NULL | Full name |
+| `specialty` | `VARCHAR(100)` | NULLABLE | NULL | Primary specialty |
+| `primary_practice_location` | `VARCHAR(100)` | NULLABLE | NULL | Primary city/location |
+| `centres_of_practice` | `JSON` | NOT NULL | [] | Practice centres |
+| `years_of_clinical_experience` | `INTEGER` | NULLABLE | NULL | Clinical experience |
+| `years_post_specialisation` | `INTEGER` | NULLABLE | NULL | Post-specialisation years |
+| **Block 2: Credentials & Trust Markers** |||||
+| `year_of_mbbs` | `INTEGER` | NULLABLE | NULL | MBBS year |
+| `year_of_specialisation` | `INTEGER` | NULLABLE | NULL | Specialisation year |
+| `fellowships` | `JSON` | NOT NULL | [] | Fellowships |
+| `qualifications` | `JSON` | NOT NULL | [] | Qualifications |
+| `professional_memberships` | `JSON` | NOT NULL | [] | Professional memberships |
+| `awards_academic_honours` | `JSON` | NOT NULL | [] | Awards and honours |
+| **Block 3: Clinical Focus & Expertise** |||||
+| `areas_of_clinical_interest` | `JSON` | NOT NULL | [] | Clinical interests |
+| `practice_segments` | `VARCHAR(50)` | NULLABLE | NULL | Practice segment |
+| `conditions_commonly_treated` | `JSON` | NOT NULL | [] | Commonly treated conditions |
+| `conditions_known_for` | `JSON` | NOT NULL | [] | Known-for conditions |
+| `conditions_want_to_treat_more` | `JSON` | NOT NULL | [] | Want to treat more |
+| **Block 4: The Human Side** |||||
+| `training_experience` | `JSON` | NOT NULL | [] | Training experiences |
+| `motivation_in_practice` | `JSON` | NOT NULL | [] | Motivations |
+| `unwinding_after_work` | `JSON` | NOT NULL | [] | Unwinding activities |
+| `recognition_identity` | `JSON` | NOT NULL | [] | Recognition items |
+| `quality_time_interests` | `JSON` | NOT NULL | [] | Quality time interests |
+| `quality_time_interests_text` | `TEXT` | NULLABLE | NULL | Quality time text |
+| `professional_achievement` | `TEXT` | NULLABLE | NULL | Professional achievement |
+| `personal_achievement` | `TEXT` | NULLABLE | NULL | Personal achievement |
+| `professional_aspiration` | `TEXT` | NULLABLE | NULL | Professional aspiration |
+| `personal_aspiration` | `TEXT` | NULLABLE | NULL | Personal aspiration |
+| **Block 5: Patient Value & Choice Factors** |||||
+| `what_patients_value_most` | `TEXT` | NULLABLE | NULL | Patient value |
+| `approach_to_care` | `TEXT` | NULLABLE | NULL | Care approach |
+| `availability_philosophy` | `TEXT` | NULLABLE | NULL | Availability philosophy |
+| **Block 6: Content Seed** |||||
+| `content_seeds` | `JSON` | NOT NULL | [] | Content seeds |
+| **Legacy Compatibility Fields** |||||
+| `primary_specialization` | `TEXT` | NULLABLE | NULL | Primary specialty (legacy) |
+| `years_of_experience` | `INTEGER` | NULLABLE | NULL | Experience years |
+| `consultation_fee` | `FLOAT` | NULLABLE | NULL | Consultation fee |
+| `consultation_currency` | `VARCHAR(10)` | NULLABLE | 'INR' | Currency code |
+| `medical_registration_number` | `VARCHAR(100)` | NULLABLE | NULL | Registration number |
+| `registration_year` | `INTEGER` | NULLABLE | NULL | Registration year |
+| `registration_authority` | `VARCHAR(100)` | NULLABLE | NULL | Registration authority |
+| `conditions_treated` | `JSON` | NOT NULL | [] | Conditions treated |
+| `procedures_performed` | `JSON` | NOT NULL | [] | Procedures performed |
+| `age_groups_treated` | `JSON` | NOT NULL | [] | Age groups treated |
+| `sub_specialties` | `JSON` | NOT NULL | [] | Sub-specializations |
+| `areas_of_expertise` | `JSON` | NOT NULL | [] | Areas of expertise |
+| `languages` | `JSON` | NOT NULL | [] | Languages spoken |
+| `achievements` | `JSON` | NOT NULL | [] | Achievements |
+| `publications` | `JSON` | NOT NULL | [] | Publications |
+| `practice_locations` | `JSON` | NOT NULL | [] | Practice locations |
+| `onboarding_source` | `VARCHAR(50)` | NULLABLE | NULL | How onboarded: manual, resume, voice |
+| `resume_url` | `VARCHAR(500)` | NULLABLE | NULL | Resume file URL |
+| `profile_photo` | `VARCHAR(500)` | NULLABLE | NULL | Profile photo URL |
+| `verbal_intro_file` | `VARCHAR(500)` | NULLABLE | NULL | Verbal intro file URL |
+| `professional_documents` | `JSON` | NOT NULL | [] | Professional document URLs |
+| `achievement_images` | `JSON` | NOT NULL | [] | Achievement image URLs |
+| `external_links` | `JSON` | NOT NULL | [] | External links |
+| `raw_extraction_data` | `JSON` | NULLABLE | NULL | Raw AI extraction output |
+| `created_at` | `TIMESTAMP WITH TZ` | NOT NULL | UTC NOW | Record creation timestamp |
+| `updated_at` | `TIMESTAMP WITH TZ` | NULLABLE | NULL | Record update timestamp |
+
+**Indexes:**
+- Primary Key: `id`
+- Unique: `email`, `phone`
+- Index: `first_name`, `last_name`, `role`, `onboarding_status`, `onboarding_source`, `medical_registration_number`
+- Composite: `(first_name, last_name)`, `(primary_specialization, years_of_experience)`
+
+**Relationships:**
+- ONE-TO-ONE with `users` (optional, via users.doctor_id)
 
 ---
 
@@ -330,6 +587,30 @@ VERIFIED = "verified"   # Admin verified
 REJECTED = "rejected"   # Admin rejected
 ```
 
+### UserRole
+```python
+ADMIN = "admin"             # Full system access
+OPERATIONAL = "operational" # Limited admin access
+USER = "user"               # Regular user access
+```
+
+### DropdownFieldCategory
+```python
+PROFESSIONAL_IDENTITY = "professional_identity"
+CREDENTIALS = "credentials"
+CLINICAL_EXPERTISE = "clinical_expertise"
+PERSONAL = "personal"
+LOCATION = "location"
+GENERAL = "general"
+```
+
+### CreatorType
+```python
+SYSTEM = "system"   # Seeded by the system
+ADMIN = "admin"     # Added by admin
+DOCTOR = "doctor"   # Contributed by doctor
+```
+
 ---
 
 ## Relationships
@@ -352,24 +633,19 @@ doctor_identity (*)
        │ (via doctor_id)
        │
        └───────────── (*) doctor_hospital_affiliations ──── (*) hospitals
+
+doctors (1) ─────────────────── (0..1) users
 ```
 
 **Key Relationships:**
 
-1. **doctor_identity ↔ doctor_details**: One-to-One
-   - Each doctor has exactly one details record
-
+1. **doctor_identity ↔ doctor_details**: One-to-One (via doctor_id)
 2. **doctor_identity ↔ doctor_media**: One-to-Many
-   - One doctor can have multiple media files
-
 3. **doctor_identity ↔ doctor_status_history**: One-to-Many
-   - One doctor can have multiple status change records
-
 4. **doctor_identity ↔ doctor_hospital_affiliations**: One-to-Many (via doctor_id)
-   - One doctor can be affiliated with multiple hospitals
-
 5. **hospitals ↔ doctor_hospital_affiliations**: One-to-Many
-   - One hospital can have affiliations with multiple doctors
+6. **doctors ↔ users**: One-to-One (optional, via users.doctor_id → doctors.id)
+7. **voice_onboarding_blocks ↔ voice_onboarding_fields**: One-to-Many (via block_id)
 
 ---
 
@@ -377,251 +653,38 @@ doctor_identity (*)
 
 ### Performance Indexes
 
-**doctor_identity:**
-- `doctor_id` (UNIQUE, for lookups)
-- `email` (UNIQUE, for authentication)
-
-**doctor_details:**
-- `doctor_id` (UNIQUE, for joins)
-- `registration_number` (UNIQUE, for validation)
-
-**doctor_media:**
-- `doctor_id` (for fetching all media for a doctor)
-
-**doctor_status_history:**
-- `doctor_id` (for audit trail queries)
-
-**dropdown_options:**
-- `field_name` (for dropdown value lookups)
-
-**hospitals:**
-- `id` (PRIMARY)
-- `name` (for search)
-- `city` (for location filtering)
-- `state` (for location filtering)
-- `(name, city)` (COMPOSITE, for duplicate detection)
-- `(verification_status, is_active)` (COMPOSITE, for admin queries)
-
-**doctor_hospital_affiliations:**
-- `doctor_id` (for doctor affiliation queries)
-- `hospital_id` (for hospital doctor queries)
-- `(doctor_id, is_primary)` (COMPOSITE, for finding primary location)
-- `(doctor_id, hospital_id)` (UNIQUE CONSTRAINT)
+| Table | Index | Type | Purpose |
+|-------|-------|------|---------|
+| `doctor_identity` | `doctor_id` | UNIQUE | Lookups |
+| `doctor_identity` | `email` | UNIQUE | Authentication |
+| `doctor_details` | `doctor_id` | UNIQUE | Joins |
+| `doctor_details` | `registration_number` | UNIQUE | Validation |
+| `doctor_media` | `doctor_id` | INDEX | Fetch all media |
+| `doctor_status_history` | `doctor_id` | INDEX | Audit trail |
+| `dropdown_options` | `field_name` | INDEX | Value lookups |
+| `dropdown_options` | `(field_name, value)` | UNIQUE | Deduplication |
+| `dropdown_options` | `(field_name, is_active)` | INDEX | Active option queries |
+| `dropdown_options` | `category` | INDEX | Category lookups |
+| `hospitals` | `(name, city)` | COMPOSITE | Duplicate detection |
+| `hospitals` | `(verification_status, is_active)` | COMPOSITE | Admin queries |
+| `doctor_hospital_affiliations` | `(doctor_id, hospital_id)` | UNIQUE | One affiliation per hospital |
+| `doctor_hospital_affiliations` | `(doctor_id, is_primary)` | COMPOSITE | Primary location |
+| `users` | `(role, is_active)` | COMPOSITE | Role queries |
+| `users` | `(phone, is_active)` | COMPOSITE | Auth queries |
+| `doctors` | `(first_name, last_name)` | COMPOSITE | Name search |
+| `doctors` | `(primary_specialization, years_of_experience)` | COMPOSITE | Filtering |
 
 ---
 
 ## Notes
 
-1. **Cascade Deletes**: All relationships use `CASCADE DELETE` to maintain referential integrity.
-
+1. **Cascade Deletes**: Onboarding relationships use `CASCADE DELETE` to maintain referential integrity. The `users.doctor_id` FK uses `SET NULL` on delete.
 2. **Soft Deletes**: Tables use `is_active` and/or `deleted_at` for soft deletion.
-
 3. **Timestamps**: All tables include `created_at` and `updated_at` timestamps.
-
 4. **UUIDs**: Primary keys for doctor and affiliation tables use UUID v4 for global uniqueness.
-
 5. **JSON Fields**: Used extensively for flexible, schema-less data (arrays, objects).
-
 6. **Timezone Awareness**: All timestamps are `TIMESTAMP WITH TIME ZONE` in UTC.
-
-7. **Enums**: Implemented as SQLAlchemy Enums with `native_enum=False` for SQLite compatibility.
-
----
-
-## RBAC & Authentication Tables
-
-### 8. `users`
-
-**Purpose:** RBAC user accounts for authentication and authorization.
-
-**Description:** Stores user accounts with role-based access control. Users can be linked to doctors for profile management.
-
-| Column Name | Data Type | Constraints | Default | Description |
-|------------|-----------|-------------|---------|-------------|
-| `id` | `SERIAL` | PRIMARY KEY | Auto | Unique identifier |
-| `phone` | `VARCHAR(20)` | UNIQUE, NOT NULL | - | Phone number (+91XXXXXXXXXX) |
-| `email` | `VARCHAR(255)` | UNIQUE, NULLABLE | NULL | Email address |
-| `role` | `VARCHAR(20)` | NOT NULL | 'user' | Role: 'admin', 'operational', 'user' |
-| `is_active` | `BOOLEAN` | NOT NULL | TRUE | Soft delete flag |
-| `doctor_id` | `INTEGER` | FOREIGN KEY, NULLABLE | NULL | Link to doctor profile |
-| `created_at` | `TIMESTAMP WITH TZ` | NOT NULL | UTC NOW | Record creation timestamp |
-| `updated_at` | `TIMESTAMP WITH TZ` | NULLABLE | NULL | Record update timestamp |
-| `last_login_at` | `TIMESTAMP WITH TZ` | NULLABLE | NULL | Last login timestamp |
-
-**Indexes:**
-- Primary Key: `id`
-- Unique: `phone`, `email`
-- Index: `role`, `is_active`, `doctor_id`
-- Foreign Key: `doctor_id` → `doctors.id` (SET NULL on delete)
-
-**Role Definitions:**
-- `admin` - Full system access (all admin endpoints)
-- `operational` - Limited admin access (onboarding, voice config, dropdowns)
-- `user` - Regular user access (public endpoints only)
-
----
-
-## Content & Configuration Tables
-
-### 9. `testimonials`
-
-**Purpose:** Doctor testimonials for homepage carousel.
-
-**Description:** Stores testimonial content displayed on the public homepage.
-
-| Column Name | Data Type | Constraints | Default | Description |
-|------------|-----------|-------------|---------|-------------|
-| `id` | `UUID` | PRIMARY KEY | UUID v4 | Unique identifier |
-| `doctor_name` | `VARCHAR(255)` | NOT NULL | - | Testimonial author name |
-| `specialty` | `VARCHAR(100)` | NULLABLE | NULL | Doctor's specialty |
-| `designation` | `VARCHAR(255)` | NULLABLE | NULL | Professional designation |
-| `hospital_name` | `VARCHAR(255)` | NULLABLE | NULL | Hospital affiliation |
-| `location` | `VARCHAR(100)` | NULLABLE | NULL | Location/city |
-| `comment` | `TEXT` | NOT NULL | - | Testimonial text |
-| `rating` | `INTEGER` | CHECK (1-5) | NULL | Star rating |
-| `profile_image_url` | `VARCHAR(500)` | NULLABLE | NULL | Profile image URL |
-| `is_active` | `BOOLEAN` | NOT NULL | TRUE | Display flag |
-| `display_order` | `INTEGER` | NOT NULL | 0 | Sort order |
-| `created_at` | `TIMESTAMP WITH TZ` | NOT NULL | UTC NOW | Record creation timestamp |
-| `updated_at` | `TIMESTAMP WITH TZ` | NULLABLE | NULL | Record update timestamp |
-
----
-
-### 10. `dropdown_options_v2`
-
-**Purpose:** Enhanced configurable dropdown values for onboarding forms.
-
-**Description:** Stores custom dropdown options with categories, verification status, and creator tracking.
-
-| Column Name | Data Type | Constraints | Default | Description |
-|------------|-----------|-------------|---------|-------------|
-| `id` | `UUID` | PRIMARY KEY | UUID v4 | Unique identifier |
-| `field_name` | `VARCHAR(100)` | NOT NULL | - | Field identifier |
-| `category` | `VARCHAR(50)` | NOT NULL | - | Field category |
-| `value` | `VARCHAR(255)` | NOT NULL | - | Option value |
-| `display_label` | `VARCHAR(255)` | NULLABLE | NULL | Display text |
-| `description` | `TEXT` | NULLABLE | NULL | Option description |
-| `creator_type` | `VARCHAR(20)` | NOT NULL | 'system' | Who created: 'system', 'admin', 'doctor' |
-| `created_by_doctor_id` | `INTEGER` | NULLABLE | NULL | Doctor who created (if doctor-created) |
-| `is_active` | `BOOLEAN` | NOT NULL | TRUE | Active flag |
-| `is_verified` | `BOOLEAN` | NOT NULL | TRUE | Verification flag |
-| `display_order` | `INTEGER` | NOT NULL | 0 | Sort order |
-| `created_at` | `TIMESTAMP WITH TZ` | NOT NULL | UTC NOW | Record creation timestamp |
-| `updated_at` | `TIMESTAMP WITH TZ` | NULLABLE | NULL | Record update timestamp |
-
-**Indexes:**
-- Primary Key: `id`
-- Unique: `(field_name, value)`
-- Index: `field_name`, `category`, `is_active`
-
-**Supported Fields:**
-- `specialty` - Medical specializations
-- `primary_practice_location` - Cities/locations
-- `qualifications` - Degrees (MBBS, MD, etc.)
-- `fellowships` - Fellowship programs
-- `professional_memberships` - Professional associations
-- `languages_spoken` - Languages
-- `age_groups_treated` - Patient demographics
-- `practice_segments` - Practice types
-- `training_experience` - Training highlights
-- `motivation_in_practice` - Practice motivations
-- `unwinding_after_work` - Personal interests
-- `quality_time_interests` - Quality time activities
-
----
-
-## Voice Onboarding Configuration Tables
-
-### 11. `voice_onboarding_blocks`
-
-**Purpose:** Voice questionnaire block configuration.
-
-**Description:** Defines the 6-block structure of the voice onboarding questionnaire with AI prompts and progress tracking.
-
-| Column Name | Data Type | Constraints | Default | Description |
-|------------|-----------|-------------|---------|-------------|
-| `id` | `SERIAL` | PRIMARY KEY | Auto | Unique identifier |
-| `block_number` | `INTEGER` | UNIQUE, NOT NULL | - | Block sequence number (1-6) |
-| `block_name` | `VARCHAR(100)` | NOT NULL | - | Internal block name |
-| `display_name` | `VARCHAR(200)` | NOT NULL | - | User-facing block title |
-| `ai_prompt` | `TEXT` | NULLABLE | NULL | AI system prompt for this block |
-| `ai_disclaimer` | `TEXT` | NULLABLE | NULL | Disclaimer shown before AI interaction |
-| `completion_percentage` | `INTEGER` | NOT NULL | 0 | Progress % when completed |
-| `completion_message` | `VARCHAR(200)` | NULLABLE | NULL | Message shown on completion |
-| `is_active` | `BOOLEAN` | NOT NULL | TRUE | Active flag |
-| `display_order` | `INTEGER` | NOT NULL | 0 | Display sequence |
-| `created_at` | `TIMESTAMP WITH TZ` | NOT NULL | UTC NOW | Record creation timestamp |
-| `updated_at` | `TIMESTAMP WITH TZ` | NULLABLE | NULL | Record update timestamp |
-
-**Block Structure:**
-- Block 1: Professional Identity (0-17%)
-- Block 2: Credentials & Trust Markers (17-33%)
-- Block 3: Clinical Focus & Expertise (33-50%)
-- Block 4: The Human Side (50-67%)
-- Block 5: Patient Value & Choice Factors (67-83%)
-- Block 6: Content Seeds (83-100%)
-
----
-
-### 12. `voice_onboarding_fields`
-
-**Purpose:** Voice questionnaire field configuration.
-
-**Description:** Defines individual fields within each voice onboarding block, including validation rules and AI questions.
-
-| Column Name | Data Type | Constraints | Default | Description |
-|------------|-----------|-------------|---------|-------------|
-| `id` | `SERIAL` | PRIMARY KEY | Auto | Unique identifier |
-| `block_id` | `INTEGER` | FOREIGN KEY, NOT NULL | - | References voice_onboarding_blocks.id |
-| `field_name` | `VARCHAR(100)` | NOT NULL | - | Internal field name |
-| `display_name` | `VARCHAR(200)` | NOT NULL | - | User-facing field label |
-| `field_type` | `VARCHAR(50)` | NOT NULL | - | Type: text, number, select, multi_select, year |
-| `is_required` | `BOOLEAN` | NOT NULL | FALSE | Required validation |
-| `validation_regex` | `VARCHAR(255)` | NULLABLE | NULL | Regex pattern for validation |
-| `min_length` | `INTEGER` | NULLABLE | NULL | Minimum text length |
-| `max_length` | `INTEGER` | NULLABLE | NULL | Maximum text length |
-| `min_value` | `INTEGER` | NULLABLE | NULL | Minimum numeric value |
-| `max_value` | `INTEGER` | NULLABLE | NULL | Maximum numeric value |
-| `max_selections` | `INTEGER` | NULLABLE | NULL | Max selections for multi_select |
-| `options` | `JSON` | NOT NULL | [] | Options for select/multi_select |
-| `ai_question` | `TEXT` | NULLABLE | NULL | AI question prompt |
-| `ai_followup` | `TEXT` | NULLABLE | NULL | AI follow-up prompt |
-| `is_active` | `BOOLEAN` | NOT NULL | TRUE | Active flag |
-| `display_order` | `INTEGER` | NOT NULL | 0 | Display sequence within block |
-| `created_at` | `TIMESTAMP WITH TZ` | NOT NULL | UTC NOW | Record creation timestamp |
-| `updated_at` | `TIMESTAMP WITH TZ` | NULLABLE | NULL | Record update timestamp |
-
-**Indexes:**
-- Primary Key: `id`
-- Unique: `(block_id, field_name)`
-- Foreign Key: `block_id` → `voice_onboarding_blocks.id` (CASCADE DELETE)
-
----
-
-## Legacy Tables
-
-### 13. `doctors`
-
-**Purpose:** Legacy main doctor entity from initial implementation.
-
-**Description:** Original doctor table with comprehensive fields. Used alongside the onboarding tables.
-
-| Column Name | Data Type | Constraints | Default | Description |
-|------------|-----------|-------------|---------|-------------|
-| `id` | `SERIAL` | PRIMARY KEY | Auto | Unique identifier |
-| `title` | `VARCHAR(20)` | NULLABLE | NULL | Dr., Prof., Prof. Dr. |
-| `first_name` | `VARCHAR(100)` | NOT NULL | - | First name |
-| `last_name` | `VARCHAR(100)` | NOT NULL | - | Last name |
-| `email` | `VARCHAR(100)` | UNIQUE, NOT NULL | - | Email address |
-| `phone` | `VARCHAR(20)` | UNIQUE, NULLABLE | NULL | Phone number |
-| `role` | `VARCHAR(20)` | NOT NULL | 'user' | Role: admin, operational, user |
-| `specialty` | `VARCHAR(100)` | NULLABLE | NULL | Primary specialty |
-| `years_of_experience` | `INTEGER` | NULLABLE | NULL | Experience years |
-| ... | ... | ... | ... | (60+ fields for 6-block questionnaire) |
-| `created_at` | `TIMESTAMP WITH TZ` | NOT NULL | UTC NOW | Record creation timestamp |
-| `updated_at` | `TIMESTAMP WITH TZ` | NULLABLE | NULL | Record update timestamp |
-
-**Note:** See full field list in the Doctor model source code.
+7. **Enums**: Implemented with `native_enum=False` for SQLite compatibility.
 
 ---
 
@@ -643,11 +706,12 @@ Database schema is managed via **Alembic** migrations:
 | `009_add_dropdown_options_table.py` | Dynamic dropdown support |
 | `010_add_testimonials_table.py` | Testimonials table |
 | `011_add_voice_onboarding_fields.py` | Voice onboarding config tables |
-| `012_add_questionnaire_fields_to_doctors.py` | 6-block questionnaire fields |
-| `013_enhance_dropdown_options.py` | Dropdown options v2 |
-| `014_add_role_to_doctors.py` | RBAC role field |
+| `012_add_questionnaire_fields_to_doctors.py` | 6-block questionnaire fields on doctors |
+| `013_enhance_dropdown_options.py` | Dropdown options v2 (categories, creator) |
+| `014_add_role_to_doctors.py` | RBAC role field on doctors |
 | `015_make_required_fields_nullable.py` | Nullable fields update |
 | `016_add_users_table.py` | RBAC users table |
+| `017_add_missing_doctor_details_columns.py` | 30 new columns on doctor_details (6-block questionnaire) |
 
 **Running Migrations:**
 ```bash
@@ -666,6 +730,5 @@ alembic current
 
 ---
 
-**Generated by:** Database Schema Analyzer  
-**Last Updated:** 2026-01-20  
-**Schema Version:** 3.0.0
+**Last Updated:** 2026-02-22  
+**Schema Version:** 4.0.0
