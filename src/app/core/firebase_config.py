@@ -6,10 +6,11 @@ endpoint for local development without a service account.
 """
 
 import os
+
 import firebase_admin
-from firebase_admin import auth as firebase_auth
 import httpx
 import structlog
+from firebase_admin import auth as firebase_auth
 
 logger = structlog.get_logger(__name__)
 
@@ -41,29 +42,29 @@ def _verify_via_google_api(id_token: str) -> dict:
     This calls Google's secure token verification endpoint which
     doesn't require a service account — ideal for local development.
     """
-    url = f"https://www.googleapis.com/identitytoolkit/v3/relyingparty/getAccountInfo?key=AIzaSyDVHfAHIom36kPAuyx0ohqPxfLoR3YB5Vo"
+    url = "https://www.googleapis.com/identitytoolkit/v3/relyingparty/getAccountInfo?key=AIzaSyDVHfAHIom36kPAuyx0ohqPxfLoR3YB5Vo"
 
     # First, verify the token with Google's secure token verifier
-    verify_url = f"https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=AIzaSyDVHfAHIom36kPAuyx0ohqPxfLoR3YB5Vo"
-    
+    verify_url = "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=AIzaSyDVHfAHIom36kPAuyx0ohqPxfLoR3YB5Vo"
+
     response = httpx.post(
         verify_url,
         json={"idToken": id_token},
         timeout=10.0,
     )
-    
+
     if response.status_code != 200:
         error_msg = response.json().get("error", {}).get("message", "Unknown error")
         raise ValueError(f"Google token verification failed: {error_msg}")
-    
+
     data = response.json()
     users = data.get("users", [])
-    
+
     if not users:
         raise ValueError("No user found for this token")
-    
+
     user_info = users[0]
-    
+
     # Build a decoded token dict matching firebase-admin's format
     return {
         "uid": user_info.get("localId", ""),

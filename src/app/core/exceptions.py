@@ -7,6 +7,7 @@ converted to appropriate HTTP responses by the global exception handler.
 
 from typing import Any
 
+
 class AppException(Exception):
     """
     Base exception for all application-specific errors.
@@ -14,7 +15,7 @@ class AppException(Exception):
     All custom exceptions should inherit from this class.
     The global exception handler converts these to HTTP responses.
     """
-    
+
     def __init__(
         self,
         message: str,
@@ -27,7 +28,7 @@ class AppException(Exception):
         self.status_code = status_code
         self.details = details or {}
         super().__init__(self.message)
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert exception to dictionary for JSON response."""
         return {
@@ -44,7 +45,7 @@ class AppException(Exception):
 
 class BadRequestError(AppException):
     """Invalid request data or parameters (400)."""
-    
+
     def __init__(
         self,
         message: str = "Invalid request",
@@ -60,7 +61,7 @@ class BadRequestError(AppException):
 
 class UnauthorizedError(AppException):
     """Authentication required or failed (401)."""
-    
+
     def __init__(
         self,
         message: str = "Authentication required",
@@ -76,7 +77,7 @@ class UnauthorizedError(AppException):
 
 class ForbiddenError(AppException):
     """Permission denied (403)."""
-    
+
     def __init__(
         self,
         message: str = "Permission denied",
@@ -92,7 +93,7 @@ class ForbiddenError(AppException):
 
 class NotFoundError(AppException):
     """Resource not found (404)."""
-    
+
     def __init__(
         self,
         message: str = "Resource not found",
@@ -115,7 +116,7 @@ class NotFoundError(AppException):
 
 class ConflictError(AppException):
     """Resource conflict, e.g., duplicate entry (409)."""
-    
+
     def __init__(
         self,
         message: str = "Resource conflict",
@@ -131,7 +132,7 @@ class ConflictError(AppException):
 
 class ValidationError(AppException):
     """Data validation failed (422)."""
-    
+
     def __init__(
         self,
         message: str = "Validation failed",
@@ -151,7 +152,7 @@ class ValidationError(AppException):
 
 class RateLimitError(AppException):
     """Rate limit exceeded (429)."""
-    
+
     def __init__(
         self,
         message: str = "Rate limit exceeded",
@@ -175,7 +176,7 @@ class RateLimitError(AppException):
 
 class InternalServerError(AppException):
     """Internal server error (500)."""
-    
+
     def __init__(
         self,
         message: str = "Internal server error",
@@ -191,7 +192,7 @@ class InternalServerError(AppException):
 
 class ServiceUnavailableError(AppException):
     """Service temporarily unavailable (503)."""
-    
+
     def __init__(
         self,
         message: str = "Service temporarily unavailable",
@@ -211,7 +212,7 @@ class ServiceUnavailableError(AppException):
 
 class ExternalServiceError(AppException):
     """External service call failed (502)."""
-    
+
     def __init__(
         self,
         service_name: str,
@@ -234,7 +235,7 @@ class ExternalServiceError(AppException):
 
 class DoctorNotFoundError(NotFoundError):
     """Doctor resource not found."""
-    
+
     def __init__(
         self,
         doctor_id: int | None = None,
@@ -303,7 +304,7 @@ class OnboardingProfileAlreadyExistsError(ConflictError):
 
 class SessionNotFoundError(NotFoundError):
     """Voice session not found."""
-    
+
     def __init__(self, session_id: str) -> None:
         super().__init__(
             message=f"Voice session not found: {session_id}",
@@ -314,7 +315,7 @@ class SessionNotFoundError(NotFoundError):
 
 class SessionExpiredError(BadRequestError):
     """Voice session has expired."""
-    
+
     def __init__(self, session_id: str) -> None:
         super().__init__(
             message=f"Voice session has expired: {session_id}",
@@ -324,7 +325,7 @@ class SessionExpiredError(BadRequestError):
 
 class ConfigurationError(AppException):
     """Application configuration error."""
-    
+
     def __init__(
         self,
         message: str = "Configuration error",
@@ -339,7 +340,7 @@ class ConfigurationError(AppException):
 
 class FileValidationError(BadRequestError):
     """File upload validation failed."""
-    
+
     def __init__(
         self,
         message: str,
@@ -359,7 +360,7 @@ class FileValidationError(BadRequestError):
 
 class AIServiceError(ServiceUnavailableError):
     """AI/Gemini service error."""
-    
+
     def __init__(
         self,
         message: str = "AI service temporarily unavailable",
@@ -377,7 +378,7 @@ class AIServiceError(ServiceUnavailableError):
 
 class ExtractionError(AppException):
     """Data extraction from resume/voice failed."""
-    
+
     def __init__(
         self,
         message: str = "Failed to extract data",

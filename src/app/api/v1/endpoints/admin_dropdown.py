@@ -20,7 +20,6 @@ from ....models.dropdown_option import (
     DropdownFieldCategory,
     DropdownOption,
 )
-from ....repositories.dropdown_option_repository import DropdownOptionRepository
 from ....schemas.dropdown_option import (
     BulkCreateResponse,
     DeactivateResponse,
@@ -30,7 +29,6 @@ from ....schemas.dropdown_option import (
     DropdownOptionBulkCreate,
     DropdownOptionCreate,
     DropdownOptionResponse,
-    DropdownOptionSummary,
     DropdownOptionUpdate,
     DropdownStatsResponse,
     SeedResponse,
@@ -75,7 +73,7 @@ DropdownServiceDep = Annotated[DropdownOptionService, Depends(get_dropdown_servi
 async def list_dropdown_fields() -> list[dict[str, Any]]:
     """List all configured dropdown fields with their metadata."""
     fields = []
-    
+
     for field_name, config in DROPDOWN_FIELD_CONFIG.items():
         category = config["category"]
         fields.append({
@@ -85,7 +83,7 @@ async def list_dropdown_fields() -> list[dict[str, Any]]:
             "multi_select": config.get("multi_select", False),
             "allow_custom": config.get("allow_custom", True),
         })
-    
+
     return fields
 
 
@@ -106,17 +104,17 @@ async def get_field_options(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Field '{field_name}' is not a valid dropdown field",
         )
-    
+
     config = DROPDOWN_FIELD_CONFIG[field_name]
     category = config["category"]
-    
+
     # Get options from repository
     repo = service.repo
     options = await repo.get_options_for_field(
         field_name,
         active_only=not include_inactive,
     )
-    
+
     return {
         "field_name": field_name,
         "display_name": config["display_name"],
@@ -159,14 +157,14 @@ async def create_option(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Field '{field_name}' is not a valid dropdown field",
         )
-    
+
     result = await service.admin_add_value(
         field_name=field_name,
         value=data.value,
         display_label=data.display_label,
         description=data.description,
     )
-    
+
     return result
 
 
@@ -188,12 +186,12 @@ async def bulk_create_options(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Field '{field_name}' is not a valid dropdown field",
         )
-    
+
     result = await service.admin_bulk_add_values(
         field_name=field_name,
         values=data.values,
     )
-    
+
     return result
 
 
@@ -210,7 +208,7 @@ async def update_option(
 ) -> DropdownOption:
     """Update a dropdown option."""
     repo = service.repo
-    
+
     # Get existing option
     option = await repo.get_by_id(option_id)
     if not option:
@@ -218,12 +216,12 @@ async def update_option(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Option with ID '{option_id}' not found",
         )
-    
+
     # Update only provided fields
     update_data = data.model_dump(exclude_unset=True)
     if update_data:
         option = await repo.update(option_id, **update_data)
-    
+
     return option
 
 
@@ -239,13 +237,13 @@ async def deactivate_option(
 ) -> dict[str, Any]:
     """Deactivate a dropdown option (soft delete)."""
     result = await service.admin_deactivate_value(option_id)
-    
+
     if not result["success"]:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Option with ID '{option_id}' not found",
         )
-    
+
     return result
 
 
@@ -265,13 +263,13 @@ async def verify_option(
 ) -> dict[str, Any]:
     """Verify a dropdown option (approve doctor contribution)."""
     result = await service.admin_verify_value(option_id)
-    
+
     if not result["success"]:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Option with ID '{option_id}' not found",
         )
-    
+
     return result
 
 
@@ -304,9 +302,9 @@ async def seed_dropdown_values(
 ) -> dict[str, Any]:
     """Seed initial dropdown values."""
     results = await service.seed_initial_values(force=force)
-    
+
     total = sum(results.values())
-    
+
     return {
         "success": True,
         "total_seeded": total,
@@ -344,14 +342,14 @@ async def get_dropdown_data(
 ) -> dict[str, Any]:
     """Get all dropdown data for frontend consumption."""
     data = await service.get_dropdown_data(include_metadata=include_metadata)
-    
+
     if include_metadata:
         # Data is already in the right format with metadata
         return {
             "data": {field: info.get("values", []) if isinstance(info, dict) else info for field, info in data.items()},
             "metadata": {field: {k: v for k, v in info.items() if k != "values"} for field, info in data.items() if isinstance(info, dict)},
         }
-    
+
     return {
         "data": data,
         "metadata": None,

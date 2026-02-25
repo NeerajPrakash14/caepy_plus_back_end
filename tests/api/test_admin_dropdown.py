@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
 import pytest
 
 if TYPE_CHECKING:
@@ -76,11 +77,11 @@ async def test_update_option(client: AsyncClient, auth_headers: dict[str, str]) 
         headers=auth_headers
     )
     assert create_resp.status_code == 201
-    
+
     # Get ID
     list_resp = await client.get("/api/v1/admin/dropdown-options/fields/specialty", headers=auth_headers)
     option_id = next(opt["id"] for opt in list_resp.json()["options"] if opt["value"] == "Update Me")
-    
+
     # Update
     payload = {"display_label": "Updated Label", "is_verified": True}
     response = await client.put(
@@ -102,11 +103,11 @@ async def test_deactivate_option(client: AsyncClient, auth_headers: dict[str, st
         headers=auth_headers
     )
     assert create_resp.status_code == 201
-    
+
     # Get ID
     list_resp = await client.get("/api/v1/admin/dropdown-options/fields/specialty", headers=auth_headers)
     option_id = next(opt["id"] for opt in list_resp.json()["options"] if opt["value"] == "Deactivate Me")
-    
+
     response = await client.delete(
         f"/api/v1/admin/dropdown-options/options/{option_id}",
         headers=auth_headers
@@ -124,11 +125,11 @@ async def test_verify_option(client: AsyncClient, auth_headers: dict[str, str]) 
         headers=auth_headers
     )
     assert create_resp.status_code == 201
-    
+
     # Get ID
     list_resp = await client.get("/api/v1/admin/dropdown-options/fields/specialty", headers=auth_headers)
     option_id = next(opt["id"] for opt in list_resp.json()["options"] if opt["value"] == "Verify Me")
-    
+
     response = await client.post(
         f"/api/v1/admin/dropdown-options/options/{option_id}/verify",
         headers=auth_headers

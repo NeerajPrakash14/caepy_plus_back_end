@@ -4,10 +4,10 @@ Async data access helpers for testimonials table.
 """
 from __future__ import annotations
 
-from typing import Sequence
-from datetime import datetime, UTC
+from collections.abc import Sequence
+from datetime import UTC, datetime
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.testimonial import Testimonial

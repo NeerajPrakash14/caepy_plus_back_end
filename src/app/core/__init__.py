@@ -4,7 +4,7 @@ from .prompts import PromptManager, get_prompt_manager
 
 __all__ = [
     "Settings",
-    "get_settings", 
+    "get_settings",
     "settings",
     "PromptManager",
     "get_prompt_manager",

@@ -12,12 +12,11 @@ All endpoints require admin authentication.
 from __future__ import annotations
 
 import logging
-from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ....core.rbac import AdminUser, AdminOrOperationalUser
+from ....core.rbac import AdminOrOperationalUser, AdminUser
 from ....db.session import get_db
 from ....models.enums import UserRole
 from ....repositories.user_repository import UserRepository
@@ -77,7 +76,7 @@ async def list_users(
         role=role,
         is_active=is_active,
     )
-    
+
     return UserListResponse(
         success=True,
         users=[UserResponse.model_validate(u) for u in users],
@@ -100,7 +99,7 @@ async def list_admins(
 ) -> UserListResponse:
     """List all admin users."""
     admins = await repo.get_admins(active_only=active_only)
-    
+
     return UserListResponse(
         success=True,
         users=[UserResponse.model_validate(u) for u in admins],
@@ -123,13 +122,13 @@ async def get_user(
 ) -> UserResponse:
     """Get a specific user by ID."""
     user = await repo.get_by_id(user_id)
-    
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"success": False, "message": "User not found"},
         )
-    
+
     return UserResponse.model_validate(user)
 
 
@@ -289,13 +288,13 @@ async def update_user(
 ) -> UserUpdateResponse:
     """Update a user's details."""
     user = await repo.get_by_id(user_id)
-    
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"success": False, "message": "User not found"},
         )
-    
+
     # Prevent self-demotion (admin can't remove their own admin role)
     if user_id == admin.id and payload.role and payload.role != UserRole.ADMIN.value:
         raise HTTPException(
@@ -305,7 +304,7 @@ async def update_user(
                 "message": "Cannot demote yourself. Ask another admin.",
             },
         )
-    
+
     # Prevent self-deactivation
     if user_id == admin.id and payload.is_active is False:
         raise HTTPException(
@@ -315,22 +314,22 @@ async def update_user(
                 "message": "Cannot deactivate yourself. Ask another admin.",
             },
         )
-    
+
     # Apply updates
     if payload.role is not None:
         user = await repo.update_role(user_id, payload.role)
-    
+
     if payload.is_active is not None:
         user = await repo.set_active(user_id, payload.is_active)
-    
+
     if payload.doctor_id is not None:
         user = await repo.link_doctor(user_id, payload.doctor_id)
-    
+
     # Refresh user data
     user = await repo.get_by_id(user_id)
-    
+
     logger.info(f"Admin {admin.id} updated user {user_id}")
-    
+
     return UserUpdateResponse(
         success=True,
         message="User updated successfully",
@@ -352,13 +351,13 @@ async def update_user_role(
 ) -> UserUpdateResponse:
     """Update a user's role."""
     user = await repo.get_by_id(user_id)
-    
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"success": False, "message": "User not found"},
         )
-    
+
     # Prevent self-demotion
     if user_id == admin.id and payload.role != UserRole.ADMIN.value:
         raise HTTPException(
@@ -368,14 +367,14 @@ async def update_user_role(
                 "message": "Cannot demote yourself. Ask another admin.",
             },
         )
-    
+
     old_role = user.role
     user = await repo.update_role(user_id, payload.role)
-    
+
     logger.info(
         f"Admin {admin.id} changed user {user_id} role: {old_role} -> {payload.role}"
     )
-    
+
     return UserUpdateResponse(
         success=True,
         message=f"User role changed from '{old_role}' to '{payload.role}'",
@@ -397,13 +396,13 @@ async def update_user_status(
 ) -> UserUpdateResponse:
     """Activate or deactivate a user."""
     user = await repo.get_by_id(user_id)
-    
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"success": False, "message": "User not found"},
         )
-    
+
     # Prevent self-deactivation
     if user_id == admin.id and not payload.is_active:
         raise HTTPException(
@@ -413,12 +412,12 @@ async def update_user_status(
                 "message": "Cannot deactivate yourself. Ask another admin.",
             },
         )
-    
+
     user = await repo.set_active(user_id, payload.is_active)
     status_text = "activated" if payload.is_active else "deactivated"
-    
+
     logger.info(f"Admin {admin.id} {status_text} user {user_id}")
-    
+
     return UserUpdateResponse(
         success=True,
         message=f"User {status_text} successfully",
@@ -443,13 +442,13 @@ async def deactivate_user(
 ) -> UserDeleteResponse:
     """Deactivate a user (soft delete)."""
     user = await repo.get_by_id(user_id)
-    
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"success": False, "message": "User not found"},
         )
-    
+
     # Prevent self-deactivation
     if user_id == admin.id:
         raise HTTPException(
@@ -459,11 +458,11 @@ async def deactivate_user(
                 "message": "Cannot deactivate yourself. Ask another admin.",
             },
         )
-    
+
     await repo.deactivate(user_id)
-    
+
     logger.info(f"Admin {admin.id} deactivated user {user_id}")
-    
+
     return UserDeleteResponse(
         success=True,
         message="User deactivated successfully",

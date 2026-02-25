@@ -26,13 +26,13 @@ from typing import Annotated
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .config import Settings, get_settings
-from .exceptions import UnauthorizedError, ForbiddenError
-from .security import _decode_jwt
 from ..db.session import get_db
-from ..models.user import User
 from ..models.enums import UserRole
+from ..models.user import User
 from ..repositories.user_repository import UserRepository
+from .config import Settings, get_settings
+from .exceptions import ForbiddenError, UnauthorizedError
+from .security import _decode_jwt
 
 logger = logging.getLogger(__name__)
 
@@ -62,17 +62,17 @@ async def get_current_user(
             message="Missing or invalid Authorization header",
             error_code="UNAUTHORIZED",
         )
-    
+
     token = auth_header.split(" ", 1)[1].strip()
     if not token:
         raise UnauthorizedError(
             message="Missing access token",
             error_code="UNAUTHORIZED",
         )
-    
+
     # Decode and validate JWT
     payload = _decode_jwt(token, settings=settings)
-    
+
     # Get phone from JWT (sub claim)
     phone = payload.get("sub")
     if not isinstance(phone, str) or not phone:
@@ -80,11 +80,11 @@ async def get_current_user(
             message="Invalid token subject",
             error_code="INVALID_TOKEN",
         )
-    
+
     # Look up user in database
     user_repo = UserRepository(db)
     user = await user_repo.get_by_phone(phone)
-    
+
     if not user:
         # User not in users table - they may have authenticated via OTP
         # but not been added to users table yet
@@ -93,7 +93,7 @@ async def get_current_user(
             message="User not found. Please contact administrator.",
             error_code="USER_NOT_FOUND",
         )
-    
+
     # Check if user is active
     if not user.is_active:
         logger.warning(f"Inactive user attempted access: user_id={user.id}")
@@ -101,7 +101,7 @@ async def get_current_user(
             message="Your account has been deactivated. Please contact administrator.",
             error_code="USER_INACTIVE",
         )
-    
+
     return user
 
 
@@ -124,7 +124,7 @@ async def require_admin(
             message="Admin access required",
             error_code="ADMIN_REQUIRED",
         )
-    
+
     return current_user
 
 
@@ -140,7 +140,7 @@ async def require_admin_or_operational(
         ForbiddenError: If user is neither admin nor operational
     """
     allowed_roles = (UserRole.ADMIN.value, UserRole.OPERATIONAL.value)
-    
+
     if current_user.role not in allowed_roles:
         logger.warning(
             f"Unauthorized role attempted access: user_id={current_user.id}, role={current_user.role}"
@@ -149,7 +149,7 @@ async def require_admin_or_operational(
             message="Admin or operational access required",
             error_code="INSUFFICIENT_PERMISSIONS",
         )
-    
+
     return current_user
 
 

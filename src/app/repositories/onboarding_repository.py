@@ -11,9 +11,10 @@ All operations use SQLAlchemy's async session and work against SQLite
 """
 from __future__ import annotations
 
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
-from sqlalchemy import delete, select, func
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.onboarding import (
@@ -21,9 +22,10 @@ from ..models.onboarding import (
     DoctorIdentity,
     DoctorMedia,
     DoctorStatusHistory,
-    OnboardingStatus,
     DropdownOption,
+    OnboardingStatus,
 )
+
 
 class OnboardingRepository:
     """Repository providing common CRUD operations for onboarding tables."""
@@ -55,7 +57,7 @@ class OnboardingRepository:
         """Return doctor_identity rows with optional status filter and pagination."""
 
         stmt = select(DoctorIdentity)
-        
+
         if status is not None:
             status_enum = (
                 status
@@ -63,7 +65,7 @@ class OnboardingRepository:
                 else OnboardingStatus(status)
             )
             stmt = stmt.where(DoctorIdentity.onboarding_status == status_enum)
-        
+
         stmt = stmt.offset(skip).limit(limit).order_by(DoctorIdentity.created_at.desc())
         result = await self.session.execute(stmt)
         return result.scalars().all()
@@ -73,9 +75,9 @@ class OnboardingRepository:
         status: OnboardingStatus | str | None = None,
     ) -> int:
         """Count doctor_identity rows with optional status filter."""
-        
+
         stmt = select(func.count(DoctorIdentity.doctor_id))
-        
+
         if status is not None:
             status_enum = (
                 status
@@ -83,7 +85,7 @@ class OnboardingRepository:
                 else OnboardingStatus(status)
             )
             stmt = stmt.where(DoctorIdentity.onboarding_status == status_enum)
-        
+
         result = await self.session.execute(stmt)
         return result.scalar() or 0
 

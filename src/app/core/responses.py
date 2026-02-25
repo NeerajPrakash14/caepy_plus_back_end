@@ -4,7 +4,7 @@ Standardized API Response Schemas.
 Provides consistent response structures across all API endpoints.
 Uses generic types for type-safe responses.
 """
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Generic, TypeVar
 
 from pydantic import BaseModel, Field
@@ -15,7 +15,7 @@ T = TypeVar("T")
 
 class ResponseMeta(BaseModel):
     """Metadata included in all API responses."""
-    
+
     request_id: str | None = Field(
         default=None,
         description="Unique request identifier for tracing"
@@ -51,7 +51,7 @@ class GenericResponse(BaseModel, Generic[T]):
             )
         ```
     """
-    
+
     success: bool = Field(
         default=True,
         description="Indicates successful response"
@@ -74,7 +74,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
     
     Includes pagination metadata alongside the data list.
     """
-    
+
     success: bool = Field(default=True)
     message: str
     data: list[T] = Field(description="List of items")
@@ -84,14 +84,14 @@ class PaginatedResponse(BaseModel, Generic[T]):
 
 class PaginationMeta(BaseModel):
     """Pagination metadata for list responses."""
-    
+
     total: int = Field(description="Total number of items")
     page: int = Field(ge=1, description="Current page number")
     page_size: int = Field(ge=1, le=100, description="Items per page")
     total_pages: int = Field(description="Total number of pages")
     has_next: bool = Field(description="Whether there are more pages")
     has_previous: bool = Field(description="Whether there are previous pages")
-    
+
     @classmethod
     def from_total(cls, total: int, page: int, page_size: int) -> "PaginationMeta":
         """Create pagination meta from total count."""
@@ -108,7 +108,7 @@ class PaginationMeta(BaseModel):
 
 class ErrorDetail(BaseModel):
     """Detailed error information."""
-    
+
     code: str = Field(description="Machine-readable error code")
     message: str = Field(description="Human-readable error message")
     details: dict | None = Field(
@@ -123,7 +123,7 @@ class ErrorResponse(BaseModel):
     
     Used by the global exception handler for all error responses.
     """
-    
+
     success: bool = Field(default=False)
     error: ErrorDetail
     meta: ResponseMeta = Field(default_factory=ResponseMeta)
@@ -131,7 +131,7 @@ class ErrorResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     """Health check response schema."""
-    
+
     status: str = Field(description="Service health status")
     service: str = Field(description="Service name")
     version: str = Field(description="Service version")
@@ -144,7 +144,7 @@ class HealthResponse(BaseModel):
 
 class HealthCheck(BaseModel):
     """Individual health check result."""
-    
+
     status: str = Field(description="Component status: healthy/unhealthy/degraded")
     latency_ms: float | None = Field(
         default=None,

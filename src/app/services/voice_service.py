@@ -21,9 +21,8 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any, Protocol
 
@@ -32,9 +31,8 @@ from ..core.exceptions import (
     ExtractionError,
     SessionExpiredError,
     SessionNotFoundError,
-    ValidationError,
 )
-from ..core.prompts import get_prompt_manager, PromptManager
+from ..core.prompts import PromptManager, get_prompt_manager
 from .gemini_service import GeminiService, get_gemini_service
 
 logger = logging.getLogger(__name__)
@@ -154,13 +152,13 @@ class VoiceSession:
     current_field: str | None
     last_ai_response: str
     metadata: dict[str, Any]
-    
+
     @classmethod
     def create(cls, language: str = "en") -> VoiceSession:
         """Factory method to create a new session."""
         now = datetime.now(UTC)
         session_id = f"voice_{uuid.uuid4().hex[:16]}"
-        
+
         return cls(
             session_id=session_id,
             status=SessionStatus.INITIATED,
@@ -176,12 +174,12 @@ class VoiceSession:
             last_ai_response="",
             metadata={},
         )
-    
+
     @property
     def is_expired(self) -> bool:
         """Check if session has expired."""
         return datetime.now(UTC) > self.expires_at
-    
+
     def _get_active_config(self) -> dict[str, dict[str, Any]]:
         """
         Get active field configuration.
@@ -208,7 +206,7 @@ class VoiceSession:
             f for f, cfg in config.items()
             if f in self.collected_data and cfg["validator"](self.collected_data[f])
         ]
-    
+
     @property
     def missing_fields(self) -> list[str]:
         """List of required fields not yet collected."""
@@ -217,19 +215,19 @@ class VoiceSession:
             f for f, cfg in config.items()
             if cfg["required"] and f not in self.collected_fields
         ]
-    
+
     @property
     def is_complete(self) -> bool:
         """Check if all required fields are collected."""
         return len(self.missing_fields) == 0
-    
+
     @property
     def next_field(self) -> str | None:
         """Get the next field to collect based on order."""
         missing = self.missing_fields
         if not missing:
             return None
-        
+
         config = self._get_active_config()
         # Sort by order and return first
         sorted_missing = sorted(
@@ -237,7 +235,7 @@ class VoiceSession:
             key=lambda f: config[f]["order"]
         )
         return sorted_missing[0] if sorted_missing else None
-    
+
     def with_update(self, **kwargs: Any) -> VoiceSession:
         """Create a new session with updated fields (immutable update)."""
         data = {
@@ -256,7 +254,7 @@ class VoiceSession:
             "metadata": kwargs.get("metadata", self.metadata.copy()),
         }
         return VoiceSession(**data)
-    
+
     def extend_expiry(self) -> VoiceSession:
         """Extend session expiry time."""
         return self.with_update(
@@ -270,19 +268,19 @@ class VoiceSession:
 
 class SessionStore(Protocol):
     """Protocol for session storage backends."""
-    
+
     async def get(self, session_id: str) -> VoiceSession | None:
         """Retrieve a session by ID."""
         ...
-    
+
     async def save(self, session: VoiceSession) -> None:
         """Save or update a session."""
         ...
-    
+
     async def delete(self, session_id: str) -> None:
         """Delete a session."""
         ...
-    
+
     async def cleanup_expired(self) -> int:
         """Remove expired sessions. Returns count removed."""
         ...
@@ -295,22 +293,22 @@ class InMemorySessionStore:
     For production deployments, consider implementing a persistent
     session store (e.g., database-backed) for horizontal scaling.
     """
-    
+
     def __init__(self) -> None:
         self._sessions: dict[str, VoiceSession] = {}
-    
+
     async def get(self, session_id: str) -> VoiceSession | None:
         """Retrieve a session by ID."""
         return self._sessions.get(session_id)
-    
+
     async def save(self, session: VoiceSession) -> None:
         """Save or update a session."""
         self._sessions[session.session_id] = session
-    
+
     async def delete(self, session_id: str) -> None:
         """Delete a session."""
         self._sessions.pop(session_id, None)
-    
+
     async def cleanup_expired(self) -> int:
         """Remove expired sessions."""
         expired = [
@@ -319,10 +317,10 @@ class InMemorySessionStore:
         ]
         for sid in expired:
             del self._sessions[sid]
-        
+
         if expired:
             logger.info(f"Cleaned up {len(expired)} expired voice sessions")
-        
+
         return len(expired)
 
 
@@ -388,7 +386,7 @@ class VoiceOnboardingService:
         # Get final data
         doctor_data = await service.finalize_session(session.session_id)
     """
-    
+
     def __init__(
         self,
         gemini: GeminiService | None = None,
@@ -406,7 +404,7 @@ class VoiceOnboardingService:
         self.gemini = gemini or get_gemini_service()
         self.prompts = prompts or get_prompt_manager()
         self.store = store or InMemorySessionStore()
-    
+
     async def _get_session(self, session_id: str) -> VoiceSession:
         """
         Retrieve and validate a session.
@@ -416,17 +414,17 @@ class VoiceOnboardingService:
             SessionExpiredError: Session has expired
         """
         session = await self.store.get(session_id)
-        
+
         if session is None:
             raise SessionNotFoundError(session_id=session_id)
-        
+
         if session.is_expired:
             session = session.with_update(status=SessionStatus.EXPIRED)
             await self.store.save(session)
             raise SessionExpiredError(session_id=session_id)
-        
+
         return session
-    
+
     async def start_session(
         self,
         language: str = "en",
@@ -446,40 +444,40 @@ class VoiceOnboardingService:
         """
         # Create new session
         session = VoiceSession.create(language=language)
-        
+
         if context:
             session.metadata["context"] = context
-        
+
         # Populate initial collected data
         if initial_data:
             session.collected_data.update(initial_data)
             # Update current field to skip collected ones
             session.current_field = session.next_field
-        
+
         # Get greeting from prompts
         greeting = self.prompts.get("voice_onboarding.greeting")
-        
+
         # Add greeting to conversation history
         turn = ConversationTurn(
             turn_number=0,
             role="assistant",
             content=greeting,
         )
-        
+
         session = session.with_update(
             status=SessionStatus.COLLECTING,
             conversation_history=[turn],
             last_ai_response=greeting,
             turn_count=1,
         )
-        
+
         # Save session
         await self.store.save(session)
-        
+
         logger.info(f"Started voice session: {session.session_id} with context keys: {list((context or {}).keys())}")
-        
+
         return session, greeting
-    
+
     async def process_message(
         self,
         session_id: str,
@@ -506,30 +504,30 @@ class VoiceOnboardingService:
         # Get and validate session
         session = await self._get_session(session_id)
         session = session.extend_expiry()
-        
+
         # Add user message to history
         user_turn = ConversationTurn(
             turn_number=session.turn_count,
             role="user",
             content=user_message,
         )
-        
+
         history = session.conversation_history + [user_turn]
-        
+
         # Build the mediator prompt
         prompt = self._build_mediator_prompt(session, user_message)
-        
+
         try:
             # Call Gemini for extraction and response
             ai_result = await self._call_ai_mediator(prompt)
-            
+
             # Update collected data
             new_data = session.collected_data.copy()
             new_confidence = session.field_confidence.copy()
-            
+
             # Get active config for validation
             active_config = session._get_active_config()
-            
+
             # Apply extractions
             for field_name, value in ai_result.extracted_fields.items():
                 if field_name in active_config and value is not None:
@@ -538,14 +536,14 @@ class VoiceOnboardingService:
                         new_data[field_name] = self._normalize_value(field_name, value)
                         new_confidence[field_name] = ai_result.confidence.get(field_name, 0.8)
                         logger.debug(f"Extracted {field_name}: {value}")
-            
+
             # Apply corrections
             for field_name, value in ai_result.corrections.items():
                 if field_name in active_config and value is not None:
                     new_data[field_name] = self._normalize_value(field_name, value)
                     new_confidence[field_name] = ai_result.confidence.get(field_name, 0.9)
                     logger.debug(f"Corrected {field_name}: {value}")
-            
+
             # Add AI response to history
             ai_turn = ConversationTurn(
                 turn_number=session.turn_count + 1,
@@ -553,16 +551,16 @@ class VoiceOnboardingService:
                 content=ai_result.response_text,
                 extracted_fields=ai_result.extracted_fields,
             )
-            
+
             history = history + [ai_turn]
-            
+
             # Determine new status
             new_status = session.status
             temp_session = session.with_update(collected_data=new_data)
-            
+
             if temp_session.is_complete:
                 new_status = SessionStatus.CONFIRMING
-            
+
             # Build updated session
             session = session.with_update(
                 status=new_status,
@@ -573,43 +571,43 @@ class VoiceOnboardingService:
                 last_ai_response=ai_result.response_text,
                 turn_count=session.turn_count + 2,
             )
-            
+
             # Save updated session
             await self.store.save(session)
-            
+
             logger.info(
                 f"Session {session_id}: turn {session.turn_count}, "
                 f"collected {len(session.collected_fields)}/{len(active_config)}"
             )
-            
+
             return session, ai_result.response_text
-            
+
         except (AIServiceError, ExtractionError) as e:
             logger.error(f"AI error in session {session_id}: {e}")
-            
+
             # Generate fallback response
             fallback = self.prompts.get(
                 "voice_onboarding.errors.ai_error",
                 default="I'm having trouble understanding. Could you please repeat that?"
             )
-            
+
             # Add fallback to history
             ai_turn = ConversationTurn(
                 turn_number=session.turn_count + 1,
                 role="assistant",
                 content=fallback,
             )
-            
+
             session = session.with_update(
                 conversation_history=history + [ai_turn],
                 last_ai_response=fallback,
                 turn_count=session.turn_count + 2,
             )
-            
+
             await self.store.save(session)
-            
+
             return session, fallback
-    
+
     async def get_session_status(self, session_id: str) -> VoiceSession:
         """
         Get current session status.
@@ -621,7 +619,7 @@ class VoiceOnboardingService:
             Current session state
         """
         return await self._get_session(session_id)
-    
+
     async def finalize_session(self, session_id: str) -> dict[str, Any]:
         """
         Finalize session and return data for handover.
@@ -636,33 +634,33 @@ class VoiceOnboardingService:
             Doctor data dict ready for POST /doctors
         """
         session = await self._get_session(session_id)
-        
+
         # Mark as completed
         session = session.with_update(status=SessionStatus.COMPLETED)
         await self.store.save(session)
-        
+
         # Transform to doctor creation format
         doctor_data = self._transform_to_doctor_data(session)
-        
+
         logger.info(f"Finalized voice session: {session_id}")
-        
+
         return doctor_data
-    
+
     async def cancel_session(self, session_id: str) -> None:
         """Cancel and delete a session."""
         session = await self._get_session(session_id)
         session = session.with_update(status=SessionStatus.CANCELLED)
         await self.store.delete(session_id)
         logger.info(f"Cancelled voice session: {session_id}")
-    
+
     def _build_mediator_prompt(self, session: VoiceSession, user_message: str) -> str:
         """Build the AI mediator prompt with current context."""
         # Format current data for prompt
         current_data_str = json.dumps(session.collected_data, indent=2) if session.collected_data else "{}"
-        
+
         # Get the mediator prompt template
         template = self.prompts.get("voice_onboarding.mediator_prompt")
-        
+
         # Fill in the template
         prompt = template.format(
             session_id=session.session_id,
@@ -672,18 +670,18 @@ class VoiceOnboardingService:
             current_data=current_data_str,
             user_message=user_message,
         )
-        
+
         return prompt
-    
+
     async def _call_ai_mediator(self, prompt: str) -> AIExtractionResult:
         """Call Gemini and parse the response."""
         response = await self.gemini.generate_structured(
             prompt=prompt,
             temperature=0.3,  # Lower temperature for consistent extraction
         )
-        
+
         return parse_ai_response(response)
-    
+
     def _normalize_value(self, field_name: str, value: Any) -> Any:
         """Normalize extracted values by field type."""
         # Handle explicitly known fields first
@@ -694,47 +692,47 @@ class VoiceOnboardingService:
                 digits = "".join(c for c in value if c.isdigit())
                 return int(digits) if digits else None
             return int(value) if value is not None else None
-        
+
         if field_name == RequiredField.LANGUAGES.value:
             # Ensure it's a list
             if isinstance(value, str):
                 return [lang.strip() for lang in value.split(",")]
             return value if isinstance(value, list) else [value]
-        
+
         if field_name == RequiredField.EMAIL.value:
             # Lowercase and strip
             return str(value).lower().strip() if value else None
-        
+
         if field_name == RequiredField.PHONE_NUMBER.value:
             # Keep only digits and + for country code
             if value:
                 cleaned = "".join(c for c in str(value) if c.isdigit() or c == "+")
                 return cleaned
             return None
-            
+
         # Generic handling for other fields
         if isinstance(value, list):
             return value
-            
+
         if isinstance(value, dict):
             return value
-        
+
         # Default: strip strings
         return str(value).strip() if value else value
-    
+
     def _transform_to_doctor_data(self, session: VoiceSession) -> dict[str, Any]:
         """Transform voice data to doctor creation schema."""
         data = session.collected_data
-        
+
         # Parse full name into components
         full_name = data.get("full_name", "")
         title, first_name, last_name = self._parse_full_name(full_name)
-        
+
         # Get languages as list
         languages = data.get("languages", [])
         if isinstance(languages, str):
             languages = [lang.strip() for lang in languages.split(",")]
-        
+
         return {
             "title": title,
             "first_name": first_name,
@@ -758,30 +756,30 @@ class VoiceOnboardingService:
                 "confidence_scores": session.field_confidence,
             },
         }
-    
+
     def _parse_full_name(self, full_name: str) -> tuple[str | None, str, str]:
         """Parse full name into (title, first_name, last_name)."""
         if not full_name:
             return None, "", ""
-        
+
         parts = full_name.strip().split()
         title = None
-        
+
         # Check for title
         title_prefixes = ("Dr.", "Dr", "Prof.", "Prof", "Professor")
         if parts and parts[0] in title_prefixes:
             title = "Dr." if parts[0].startswith("Dr") else "Prof."
             parts = parts[1:]
-        
+
         if not parts:
             return title, "", ""
-        
+
         if len(parts) == 1:
             return title, parts[0], ""
-        
+
         first_name = parts[0]
         last_name = " ".join(parts[1:])
-        
+
         return title, first_name, last_name
 
 

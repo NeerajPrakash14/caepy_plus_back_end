@@ -3,10 +3,10 @@
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .blob_storage_service import LocalBlobStorageService
     from .extraction_service import ResumeExtractionService
     from .gemini_service import GeminiService
     from .voice_service import VoiceOnboardingService
-    from .blob_storage_service import LocalBlobStorageService
 
 
 def get_extraction_service():

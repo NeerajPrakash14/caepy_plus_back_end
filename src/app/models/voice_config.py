@@ -5,17 +5,16 @@ These allow the questionnaire structure to be managed via database.
 """
 from __future__ import annotations
 
-from datetime import datetime, UTC
-from typing import Any
+from datetime import UTC, datetime
 
 from sqlalchemy import (
+    JSON,
+    Boolean,
     DateTime,
+    ForeignKey,
     Integer,
     String,
     Text,
-    Boolean,
-    JSON,
-    ForeignKey,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -45,7 +44,7 @@ class VoiceOnboardingBlock(Base):
     completion_message: Mapped[str | None] = mapped_column(String(200), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -57,9 +56,9 @@ class VoiceOnboardingBlock(Base):
         default=utc_now,
         onupdate=utc_now,
     )
-    
+
     # Relationship to fields
-    fields: Mapped[list["VoiceOnboardingField"]] = relationship(
+    fields: Mapped[list[VoiceOnboardingField]] = relationship(
         back_populates="block",
         cascade="all, delete-orphan",
         order_by="VoiceOnboardingField.display_order",
@@ -76,15 +75,15 @@ class VoiceOnboardingField(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     block_id: Mapped[int] = mapped_column(
-        Integer, 
-        ForeignKey("voice_onboarding_blocks.id", ondelete="CASCADE"), 
+        Integer,
+        ForeignKey("voice_onboarding_blocks.id", ondelete="CASCADE"),
         nullable=False
     )
     field_name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
     field_type: Mapped[str] = mapped_column(String(50), nullable=False)  # text, number, select, multi_select, year, multi_entry
     is_required: Mapped[bool] = mapped_column(Boolean, default=False)
-    
+
     # Validation constraints
     validation_regex: Mapped[str | None] = mapped_column(String(500), nullable=True)
     min_length: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -92,17 +91,17 @@ class VoiceOnboardingField(Base):
     min_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_selections: Mapped[int | None] = mapped_column(Integer, nullable=True)  # For multi-select
-    
+
     # Options for select/multi-select fields
     options: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
-    
+
     # AI prompts for this field
     ai_question: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_followup: Mapped[str | None] = mapped_column(Text, nullable=True)
-    
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -114,6 +113,6 @@ class VoiceOnboardingField(Base):
         default=utc_now,
         onupdate=utc_now,
     )
-    
+
     # Relationship to block
-    block: Mapped["VoiceOnboardingBlock"] = relationship(back_populates="fields")
+    block: Mapped[VoiceOnboardingBlock] = relationship(back_populates="fields")

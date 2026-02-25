@@ -9,15 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from ....core.exceptions import SessionExpiredError, SessionNotFoundError
+from ....core.rbac import CurrentUser
 from ....services.voice_service import (
     VoiceOnboardingService,
     VoiceSession,
-    SessionStatus,
-    FIELD_CONFIG,
     get_voice_service,
 )
 
-from ....core.rbac import CurrentUser
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/voice", tags=["Voice Onboarding"])
@@ -38,7 +36,7 @@ class StartSessionRequest(BaseModel):
         default=None,
         description="Optional context including field definitions for the current step",
     )
-    
+
     model_config = {
         "json_schema_extra": {
             "examples": [
@@ -56,7 +54,7 @@ class StartSessionResponse(BaseModel):
     greeting: str = Field(description="AI greeting message to start the conversation")
     fields_total: int = Field(description="Total number of fields to collect")
     created_at: datetime = Field(description="Session creation timestamp")
-    
+
     model_config = {
         "json_schema_extra": {
             "examples": [
@@ -85,7 +83,7 @@ class ChatRequest(BaseModel):
         default=None,
         description="Optional context including field definitions for the current step",
     )
-    
+
     model_config = {
         "json_schema_extra": {
             "examples": [
@@ -118,7 +116,7 @@ class ChatResponse(BaseModel):
     current_data: dict[str, Any] = Field(description="All collected data so far")
     is_complete: bool = Field(description="Whether all required fields are collected")
     turn_number: int = Field(description="Conversation turn count")
-    
+
     model_config = {
         "json_schema_extra": {
             "examples": [
@@ -164,7 +162,7 @@ class FinalizeResponse(BaseModel):
     message: str = Field(description="Status message")
     doctor_data: dict[str, Any] = Field(description="Complete doctor data ready for registration")
     confidence_scores: dict[str, float] = Field(description="Confidence score for each field")
-    
+
     model_config = {
         "json_schema_extra": {
             "examples": [
@@ -240,7 +238,7 @@ Start a new voice-based doctor onboarding session.
     },
 )
 async def start_session(
-    request: StartSessionRequest, 
+    request: StartSessionRequest,
     service: VoiceServiceDep,
     current_user: CurrentUser,
 ) -> StartSessionResponse:
@@ -252,7 +250,7 @@ async def start_session(
         initial_data["phone"] = current_user.phone
 
     session, greeting = await service.start_session(
-        language=request.language, 
+        language=request.language,
         context=request.context,
         initial_data=initial_data
     )
@@ -398,7 +396,7 @@ Finalize a completed voice onboarding session and get the doctor data.
 async def finalize_session(session_id: str, service: VoiceServiceDep) -> FinalizeResponse:
     try:
         session = await service.get_session_status(session_id)
-        
+
         if not session.is_complete:
             # Get missing fields for better error message
             active_config = session._get_active_config()
@@ -407,7 +405,7 @@ async def finalize_session(session_id: str, service: VoiceServiceDep) -> Finaliz
                 for field in session.missing_fields
                 if field in active_config and active_config[field]["required"]
             ]
-            
+
             error_detail = {
                 "error": "Session incomplete",
                 "message": f"Missing {len(missing_fields)} required field(s)",
@@ -419,7 +417,7 @@ async def finalize_session(session_id: str, service: VoiceServiceDep) -> Finaliz
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=error_detail
             )
-        
+
         doctor_data = await service.finalize_session(session_id)
         return FinalizeResponse(
             session_id=session_id,

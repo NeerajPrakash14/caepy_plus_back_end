@@ -13,9 +13,9 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.dropdown_option import (
+    DROPDOWN_FIELD_CONFIG,
     CreatorType,
     DropdownFieldCategory,
-    DROPDOWN_FIELD_CONFIG,
 )
 from ..repositories.dropdown_option_repository import DropdownOptionRepository
 
@@ -48,7 +48,7 @@ INITIAL_DROPDOWN_VALUES: dict[str, list[str]] = {
         "Rheumatology",
         "Urology",
     ],
-    
+
     # Block 1: Cities/Locations
     "primary_practice_location": [
         "Mumbai",
@@ -67,7 +67,7 @@ INITIAL_DROPDOWN_VALUES: dict[str, list[str]] = {
         "Indore",
         "Nagpur",
     ],
-    
+
     # Block 2: Fellowships
     "fellowships": [
         "FRCS (UK)",
@@ -82,7 +82,7 @@ INITIAL_DROPDOWN_VALUES: dict[str, list[str]] = {
         "Fellowship in Gastroenterology",
         "Fellowship in Nephrology",
     ],
-    
+
     # Block 2: Qualifications
     "qualifications": [
         "MBBS",
@@ -98,7 +98,7 @@ INITIAL_DROPDOWN_VALUES: dict[str, list[str]] = {
         "DMRD",
         "PhD",
     ],
-    
+
     # Block 2: Professional Memberships
     "professional_memberships": [
         "Indian Medical Association (IMA)",
@@ -111,14 +111,14 @@ INITIAL_DROPDOWN_VALUES: dict[str, list[str]] = {
         "Indian Radiological and Imaging Association (IRIA)",
         "Federation of Obstetric and Gynaecological Societies of India (FOGSI)",
     ],
-    
+
     # Block 3: Practice Segments
     "practice_segments": [
         "Adult",
         "Paediatric",
         "Both Adult and Paediatric",
     ],
-    
+
     # Block 4: Training Experience
     "training_experience": [
         "Government Medical College",
@@ -130,7 +130,7 @@ INITIAL_DROPDOWN_VALUES: dict[str, list[str]] = {
         "International Training",
         "Fellowship Abroad",
     ],
-    
+
     # Block 4: Motivation in Practice
     "motivation_in_practice": [
         "Patient outcomes",
@@ -141,7 +141,7 @@ INITIAL_DROPDOWN_VALUES: dict[str, list[str]] = {
         "Innovation in treatment",
         "Preventive healthcare",
     ],
-    
+
     # Block 4: Unwinding After Work
     "unwinding_after_work": [
         "Reading",
@@ -155,7 +155,7 @@ INITIAL_DROPDOWN_VALUES: dict[str, list[str]] = {
         "Art/Painting",
         "Photography",
     ],
-    
+
     # Block 4: Quality Time Interests
     "quality_time_interests": [
         "Family",
@@ -167,7 +167,7 @@ INITIAL_DROPDOWN_VALUES: dict[str, list[str]] = {
         "Fitness",
         "Spiritual activities",
     ],
-    
+
     # General: Languages
     "languages_spoken": [
         "English",
@@ -183,7 +183,7 @@ INITIAL_DROPDOWN_VALUES: dict[str, list[str]] = {
         "Urdu",
         "Odia",
     ],
-    
+
     # General: Age Groups
     "age_groups_treated": [
         "Neonates (0-28 days)",
@@ -233,9 +233,9 @@ class DropdownOptionService:
                     "Use force=True to re-seed."
                 )
                 return {}
-        
+
         results: dict[str, int] = {}
-        
+
         for field_name, values in INITIAL_DROPDOWN_VALUES.items():
             count = await self.repo.bulk_create(
                 field_name=field_name,
@@ -245,10 +245,10 @@ class DropdownOptionService:
                 skip_existing=True,
             )
             results[field_name] = count
-        
+
         total = sum(results.values())
         logger.info(f"Seeded {total} initial dropdown values across {len(results)} fields")
-        
+
         return results
 
     # =========================================================================
@@ -279,24 +279,24 @@ class DropdownOptionService:
             Dict mapping field_name to list of newly created values
         """
         new_values_by_field: dict[str, list[str]] = {}
-        
+
         for field_name, value in form_data.items():
             # Skip non-dropdown fields
             if field_name not in DROPDOWN_FIELD_CONFIG:
                 continue
-            
+
             # Skip if field doesn't allow custom values
             config = DROPDOWN_FIELD_CONFIG[field_name]
             if config.get("predefined_only", False):
                 continue
-            
+
             # Normalize to list
             values = value if isinstance(value, list) else [value]
             values = [v for v in values if v and isinstance(v, str)]
-            
+
             if not values:
                 continue
-            
+
             # Detect and save new values
             new_values = await self.repo.detect_and_save_new_values(
                 field_name=field_name,
@@ -305,16 +305,16 @@ class DropdownOptionService:
                 doctor_name=doctor_name,
                 doctor_email=doctor_email,
             )
-            
+
             if new_values:
                 new_values_by_field[field_name] = new_values
-        
+
         if new_values_by_field:
             total_new = sum(len(v) for v in new_values_by_field.values())
             logger.info(
                 f"Auto-saved {total_new} new dropdown values from doctor {doctor_id}"
             )
-        
+
         return new_values_by_field
 
     # =========================================================================
@@ -348,7 +348,7 @@ class DropdownOptionService:
     async def get_field_config(self) -> dict[str, Any]:
         """Get field configuration metadata for frontend."""
         config: dict[str, Any] = {}
-        
+
         for field_name, field_config in DROPDOWN_FIELD_CONFIG.items():
             category = field_config["category"]
             config[field_name] = {
@@ -357,7 +357,7 @@ class DropdownOptionService:
                 "multi_select": field_config.get("multi_select", False),
                 "allow_custom": field_config.get("allow_custom", True),
             }
-        
+
         return config
 
     # =========================================================================
@@ -386,13 +386,13 @@ class DropdownOptionService:
             created_by_name=admin_name,
             created_by_email=admin_email,
         )
-        
+
         if option and display_label:
             await self.repo.update(option.id, display_label=display_label)
-        
+
         if option and description:
             await self.repo.update(option.id, description=description)
-        
+
         return {
             "success": was_created,
             "message": "Value created" if was_created else "Value already exists",
@@ -415,7 +415,7 @@ class DropdownOptionService:
             created_by_name=admin_name,
             skip_existing=True,
         )
-        
+
         return {
             "success": True,
             "created_count": count,
@@ -426,7 +426,7 @@ class DropdownOptionService:
     async def admin_verify_value(self, option_id: str) -> dict[str, Any]:
         """Mark a doctor-contributed value as verified."""
         option = await self.repo.verify(option_id)
-        
+
         return {
             "success": option is not None,
             "option_id": option_id,
@@ -436,7 +436,7 @@ class DropdownOptionService:
     async def admin_deactivate_value(self, option_id: str) -> dict[str, Any]:
         """Soft-delete a dropdown value."""
         option = await self.repo.deactivate(option_id)
-        
+
         return {
             "success": option is not None,
             "option_id": option_id,
@@ -446,7 +446,7 @@ class DropdownOptionService:
     async def admin_get_unverified(self) -> list[dict[str, Any]]:
         """Get all unverified (doctor-contributed) values for review."""
         options = await self.repo.get_unverified()
-        
+
         return [
             {
                 "id": str(opt.id),

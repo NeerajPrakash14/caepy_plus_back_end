@@ -3,7 +3,7 @@ Voice Session Schemas.
 
 Pydantic schemas for voice onboarding session management.
 """
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -142,7 +142,7 @@ class ExtractedDataResponse(BaseModel):
 class VoiceSession(BaseModel):
     """Internal voice session model (not exposed via API)."""
     model_config = ConfigDict(use_enum_values=True)
-    
+
     session_id: str
     status: SessionStatus = SessionStatus.ACTIVE
     language: str = "en"

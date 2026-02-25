@@ -12,7 +12,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
 # =============================================================================
 # Enums (mirror model enums for serialization)
 # =============================================================================
@@ -49,7 +48,7 @@ class DropdownOptionBase(BaseModel):
 
 class DropdownOptionCreate(DropdownOptionBase):
     """Schema for creating a new dropdown option (admin)."""
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -64,7 +63,7 @@ class DropdownOptionCreate(DropdownOptionBase):
 class DropdownOptionBulkCreate(BaseModel):
     """Schema for bulk creating dropdown options."""
     values: list[str] = Field(..., min_length=1, max_length=100)
-    
+
     @field_validator("values")
     @classmethod
     def validate_values(cls, v: list[str]) -> list[str]:
@@ -73,7 +72,7 @@ class DropdownOptionBulkCreate(BaseModel):
         if not cleaned:
             raise ValueError("At least one non-empty value is required")
         return cleaned
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -115,7 +114,7 @@ class DropdownOptionResponse(BaseModel):
     is_verified: bool
     created_at: datetime
     updated_at: datetime
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -126,7 +125,7 @@ class DropdownOptionSummary(BaseModel):
     display_label: str | None = None
     creator_type: str
     is_verified: bool
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -217,7 +216,7 @@ class UnverifiedOptionResponse(BaseModel):
     created_by_name: str | None
     created_by_email: str | None
     created_at: datetime
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -234,7 +233,7 @@ class DropdownDataResponse(BaseModel):
     """
     data: dict[str, list[str]]
     metadata: dict[str, dict[str, Any]] | None = None
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {

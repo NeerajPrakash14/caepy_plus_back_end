@@ -27,23 +27,22 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .user import User
 
+# Use JSON type - SQLAlchemy handles dialect differences automatically
+# PostgreSQL: Uses JSONB, SQLite: Uses JSON
 from sqlalchemy import (
+    JSON,
     DateTime,
     Float,
-    ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     func,
-    Index,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-# Use JSON type - SQLAlchemy handles dialect differences automatically
-# PostgreSQL: Uses JSONB, SQLite: Uses JSON
-from sqlalchemy import JSON
-
 from ..db.session import Base
+
 
 class Doctor(Base):
     """
@@ -66,9 +65,9 @@ class Doctor(Base):
     Relationships:
         qualifications: One-to-many with Qualification (cascade delete)
     """
-    
+
     __tablename__ = "doctors"
-    
+
     # ==========================================================================
     # PRIMARY KEY
     # ==========================================================================
@@ -78,7 +77,7 @@ class Doctor(Base):
         index=True,
         autoincrement=True,
     )
-    
+
     # ==========================================================================
     # PERSONAL DETAILS
     # ==========================================================================
@@ -87,32 +86,32 @@ class Doctor(Base):
         nullable=True,
         comment="Professional title: Dr., Prof., Prof. Dr.",
     )
-    
+
     gender: Mapped[str | None] = mapped_column(
         String(20),
         nullable=True,
         comment="Gender: Male, Female, Other",
     )
-    
+
     first_name: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
         index=True,
     )
-    
+
     last_name: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
         index=True,
     )
-    
+
     email: Mapped[str] = mapped_column(
         String(100),
         unique=True,
         nullable=False,
         index=True,
     )
-    
+
     phone: Mapped[str | None] = mapped_column(
         String(20),
         unique=True,
@@ -120,7 +119,7 @@ class Doctor(Base):
         nullable=True,
         comment="Phone number as string to support international formats with + prefix",
     )
-    
+
     # ==========================================================================
     # AUTHORIZATION
     # ==========================================================================
@@ -132,7 +131,7 @@ class Doctor(Base):
         index=True,
         comment="User role: admin, operational, or user (default)",
     )
-    
+
     onboarding_status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
@@ -141,7 +140,7 @@ class Doctor(Base):
         index=True,
         comment="Onboarding status: pending, submitted, verified, rejected",
     )
-    
+
     # Block 1: Professional Identity
     full_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     specialty: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -234,14 +233,14 @@ class Doctor(Base):
         nullable=False,
         comment="List of procedures performed",
     )
-    
+
     age_groups_treated: Mapped[list[str]] = mapped_column(
         JSON,
         default=list,
         nullable=False,
         comment="Age groups treated (Children, Adults, Elderly, etc.)",
     )
-    
+
     # ==========================================================================
     # EXPERTISE (JSON ARRAYS)
     # ==========================================================================
@@ -252,21 +251,21 @@ class Doctor(Base):
         nullable=False,
         comment="List of sub-specializations",
     )
-    
+
     areas_of_expertise: Mapped[list[str]] = mapped_column(
         JSON,
         default=list,
         nullable=False,
         comment="Specific skills, procedures, conditions treated",
     )
-    
+
     languages: Mapped[list[str]] = mapped_column(
         JSON,
         default=list,
         nullable=False,
         comment="Languages spoken",
     )
-    
+
     # ==========================================================================
     # PROFESSIONAL ACHIEVEMENTS (JSON type)
     # ==========================================================================
@@ -276,14 +275,14 @@ class Doctor(Base):
         nullable=False,
         comment="Achievements/awards as JSON array",
     )
-    
+
     publications: Mapped[list[str]] = mapped_column(
         JSON,
         default=list,
         nullable=False,
         comment="Publications as JSON array",
     )
-    
+
     # ==========================================================================
     # PRACTICE LOCATIONS (JSON ARRAY OF OBJECTS)
     # ==========================================================================
@@ -294,7 +293,7 @@ class Doctor(Base):
         nullable=False,
         comment="Practice locations: [{hospital_name, address, city, state, phone_number, consultation_fee, consultation_type, weekly_schedule}]",
     )
-    
+
     # ==========================================================================
     # ONBOARDING METADATA
     # ==========================================================================
@@ -305,53 +304,53 @@ class Doctor(Base):
         index=True,
         comment="How doctor was onboarded: manual, resume, voice",
     )
-    
+
     resume_url: Mapped[str | None] = mapped_column(
         String(500),
         nullable=True,
         comment="URL to uploaded resume file",
     )
-    
+
     # Media & documents (URL storage)
     profile_photo: Mapped[str | None] = mapped_column(
         String(500),
         nullable=True,
         comment="Profile photo URL",
     )
-    
+
     verbal_intro_file: Mapped[str | None] = mapped_column(
         String(500),
         nullable=True,
         comment="Verbal introduction file URL",
     )
-    
+
     professional_documents: Mapped[list[str]] = mapped_column(
         JSON,
         default=list,
         nullable=False,
         comment="Professional document URLs as JSON array",
     )
-    
+
     achievement_images: Mapped[list[str]] = mapped_column(
         JSON,
         default=list,
         nullable=False,
         comment="Achievement image URLs as JSON array",
     )
-    
+
     external_links: Mapped[list[str]] = mapped_column(
         JSON,
         default=list,
         nullable=False,
         comment="External links as JSON array",
     )
-    
+
     raw_extraction_data: Mapped[dict[str, Any] | None] = mapped_column(
         JSON,
         nullable=True,
         comment="Raw AI extraction output for debugging/audit",
     )
-    
+
     # ==========================================================================
     # TIMESTAMPS
     # ==========================================================================
@@ -360,13 +359,13 @@ class Doctor(Base):
         server_default=func.now(),
         nullable=False,
     )
-    
+
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         onupdate=func.now(),
         nullable=True,
     )
-    
+
     # ==========================================================================
     # TABLE CONFIGURATION
     # ==========================================================================
@@ -376,18 +375,18 @@ class Doctor(Base):
         # Composite index for common filters
         Index("ix_doctors_spec_exp", "primary_specialization", "years_of_experience"),
     )
-    
+
     # ==========================================================================
     # RELATIONSHIPS
     # ==========================================================================
     # One-to-one with User (optional - a user may be linked to this doctor)
-    user: Mapped["User | None"] = relationship(
+    user: Mapped[User | None] = relationship(
         "User",
         back_populates="doctor",
         uselist=False,
         lazy="selectin",
     )
-    
+
     # ==========================================================================
     # METHODS
     # ==========================================================================
@@ -396,7 +395,7 @@ class Doctor(Base):
             f"<Doctor(id={self.id}, email='{self.email}', "
             f"name='{self.first_name} {self.last_name}')>"
         )
-    
+
     @property
     def computed_full_name(self) -> str:
         """Get doctor's full name with title (computed from parts)."""
@@ -407,35 +406,35 @@ class Doctor(Base):
         if self.last_name:
             parts.append(self.last_name)
         return " ".join(parts)
-    
+
     @property
     def display_name(self) -> str:
         """Get display name (title + last name)."""
         if self.title:
             return f"{self.title} {self.last_name}"
         return self.computed_full_name
-    
+
     @property
     def language_names(self) -> list[str]:
         """Get language names."""
         return self.languages
-    
+
     # Property mappings for schema compatibility
     @property
     def phone_number(self) -> str | None:
         """Map phone field to phone_number for response schema."""
         return str(self.phone) if self.phone else None
-    
+
     @property
     def awards_recognition(self) -> list[str]:
         """Map achievements field to awards_recognition for response schema."""
         return self.achievements
-    
+
     @property
     def memberships(self) -> list[str]:
         """Map professional_memberships field to memberships for response schema."""
         return self.professional_memberships
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary (for JSON serialization)."""
 

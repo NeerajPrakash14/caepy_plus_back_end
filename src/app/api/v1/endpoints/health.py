@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ....core.config import get_settings, Settings
+from ....core.config import Settings, get_settings
 from ....core.responses import HealthCheck, HealthResponse
 from ....db.session import get_db
 
@@ -36,7 +36,7 @@ async def health_check(
     - AI service availability (basic check)
     """
     checks: dict[str, HealthCheck] = {}
-    
+
     # Database health check
     db_start = time.time()
     try:
@@ -52,7 +52,7 @@ async def health_check(
             status="unhealthy",
             message=str(e),
         )
-    
+
     # AI service check (just config validation)
     if settings.GOOGLE_API_KEY:
         checks["ai_service"] = HealthCheck(
@@ -64,14 +64,14 @@ async def health_check(
             status="degraded",
             message="API key not configured",
         )
-    
+
     # Overall status
     overall_status = "healthy"
     if any(c.status == "unhealthy" for c in checks.values()):
         overall_status = "unhealthy"
     elif any(c.status == "degraded" for c in checks.values()):
         overall_status = "degraded"
-    
+
     return HealthResponse(
         status=overall_status,
         service=settings.APP_NAME,
@@ -96,7 +96,7 @@ async def readiness_probe(
     """
     # Check database
     await db.execute(text("SELECT 1"))
-    
+
     return {"status": "ready"}
 
 

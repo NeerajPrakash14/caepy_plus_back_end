@@ -16,6 +16,7 @@ from typing import Literal
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 def _get_env_file() -> str | tuple[str, ...]:
     """
     Determine which .env file(s) to load based on APP_ENV.
@@ -29,7 +30,7 @@ def _get_env_file() -> str | tuple[str, ...]:
     """
     # Get APP_ENV from environment (not from file yet)
     app_env = os.getenv("APP_ENV", "").lower()
-    
+
     # Map environment values to file suffixes
     env_to_file = {
         "dev": "dev",
@@ -39,22 +40,22 @@ def _get_env_file() -> str | tuple[str, ...]:
         "staging": "staging",
         "test": "test",
     }
-    
+
     file_suffix = env_to_file.get(app_env, app_env)
-    
+
     # Build list of env files (order: base first, then specific - later overrides earlier)
     env_files: list[str] = []
-    
+
     # Base .env first (lowest priority)
     if Path(".env").exists():
         env_files.append(".env")
-    
+
     # Environment-specific file second (overrides base)
     if file_suffix:
         env_specific = f".env.{file_suffix}"
         if Path(env_specific).exists():
             env_files.append(env_specific)
-    
+
     # Return tuple for pydantic-settings
     if env_files:
         return tuple(env_files)
@@ -72,14 +73,14 @@ class Settings(BaseSettings):
     - Set APP_ENV=prod to load .env.prod
     - Falls back to .env if specific file doesn't exist
     """
-    
+
     model_config = SettingsConfigDict(
         env_file=_get_env_file(),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
-    
+
     # ========================================
     # Application Settings
     # ========================================
@@ -99,7 +100,7 @@ class Settings(BaseSettings):
         default=False,
         description="Enable debug mode (never enable in production)"
     )
-    
+
     # ========================================
     # Server Configuration
     # ========================================
@@ -110,7 +111,7 @@ class Settings(BaseSettings):
         default="INFO",
         description="Logging level"
     )
-    
+
     # ========================================
     # Database Configuration (PostgreSQL)
     # ========================================
@@ -119,7 +120,7 @@ class Settings(BaseSettings):
         default="",
         description="PostgreSQL database connection URL (SQLAlchemy asyncpg format). Required in production."
     )
-    
+
     DATABASE_POOL_SIZE: int = Field(
         default=5,
         ge=1,
@@ -140,7 +141,7 @@ class Settings(BaseSettings):
         default=False,
         description="Echo SQL statements to logs"
     )
-    
+
     # ========================================
     # Google Gemini AI Configuration
     # ========================================
@@ -180,7 +181,7 @@ class Settings(BaseSettings):
         ge=100,
         description="Maximum tokens in AI response"
     )
-    
+
     # ========================================
     # Security Configuration
     # ========================================
@@ -198,7 +199,7 @@ class Settings(BaseSettings):
         ge=1,
         description="JWT access token expiration time (minutes)"
     )
-    
+
     # ========================================
     # CORS Configuration
     # ========================================
@@ -218,7 +219,7 @@ class Settings(BaseSettings):
         default="*",
         description="Comma-separated list of allowed headers"
     )
-    
+
     # ========================================
     # File Upload Settings
     # ========================================
@@ -232,7 +233,7 @@ class Settings(BaseSettings):
         default="pdf,png,jpg,jpeg",
         description="Comma-separated list of allowed file extensions"
     )
-    
+
     # ========================================
     # Rate Limiting
     # ========================================
@@ -246,7 +247,7 @@ class Settings(BaseSettings):
         ge=1,
         description="Rate limit window in seconds"
     )
-    
+
 
     # ========================================
     # Blob Storage Configuration
@@ -255,7 +256,7 @@ class Settings(BaseSettings):
         default="local",
         description="Storage backend to use: 'local' for filesystem, 's3' for AWS S3"
     )
-    
+
     # Local Storage Settings
     BLOB_STORAGE_PATH: str = Field(
         default="./blob_storage",
@@ -265,7 +266,7 @@ class Settings(BaseSettings):
         default="/api/v1/blobs",
         description="Base URL for serving blobs (local storage)"
     )
-    
+
     # AWS S3 Settings
     AWS_ACCESS_KEY_ID: str = Field(
         default="",
@@ -312,7 +313,7 @@ class Settings(BaseSettings):
         default="",
         description="LinQMD API session cookie (required for LinQMD sync)"
     )
-    
+
     LINQMD_SYNC_ENABLED: bool = Field(
         default=False,
         description="Enable automatic sync to LinQMD after onboarding"
@@ -327,7 +328,7 @@ class Settings(BaseSettings):
         le=120,
         description="Timeout for LinQMD API requests (seconds)"
     )
-    
+
     # ========================================
     # SMS/OTP Configuration (onlysms.co.in)
     # ========================================
@@ -367,7 +368,7 @@ class Settings(BaseSettings):
             "exactly. Use {otp} as placeholder for the OTP value."
         ),
     )
-    
+
     # OTP Settings
     OTP_LENGTH: int = Field(
         default=6,
@@ -387,7 +388,7 @@ class Settings(BaseSettings):
         le=5,
         description="Maximum OTP verification attempts before expiry"
     )
-    
+
 
     # ========================================
     # Redis Configuration (for OTP storage)
@@ -404,7 +405,7 @@ class Settings(BaseSettings):
         default=True,
         description="Enable Redis for OTP storage (fallback to in-memory if False or unavailable)"
     )
-    
+
 
     # Computed Properties
     # ========================================
@@ -414,32 +415,32 @@ class Settings(BaseSettings):
         if self.CORS_ORIGINS == "*":
             return ["*"]
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
-    
+
     @property
     def cors_methods_list(self) -> list[str]:
         """Parse CORS methods from comma-separated string."""
         return [method.strip() for method in self.CORS_ALLOW_METHODS.split(",")]
-    
+
     @property
     def allowed_extensions_list(self) -> list[str]:
         """Parse allowed file extensions from comma-separated string."""
         return [ext.strip().lower() for ext in self.ALLOWED_EXTENSIONS.split(",")]
-    
+
     @property
     def max_file_size_bytes(self) -> int:
         """Convert MB to bytes."""
         return self.MAX_FILE_SIZE_MB * 1024 * 1024
-    
+
     @property
     def is_production(self) -> bool:
         """Check if running in production environment."""
         return self.APP_ENV == "production"
-    
+
     @property
     def is_development(self) -> bool:
         """Check if running in development environment."""
         return self.APP_ENV == "development"
-    
+
     @property
     def env_file_loaded(self) -> str:
         """Return which env file(s) were loaded."""
@@ -447,8 +448,8 @@ class Settings(BaseSettings):
         if isinstance(env_file, tuple):
             return ", ".join(env_file)
         return env_file
-    
-    
+
+
     # ========================================
     # Validators
     # ========================================
@@ -464,7 +465,7 @@ class Settings(BaseSettings):
                 stacklevel=2
             )
         return v
-    
+
 
     @field_validator("DATABASE_URL")
     @classmethod
@@ -480,7 +481,7 @@ class Settings(BaseSettings):
             # Return a development default
             return "postgresql+asyncpg://linqdev:linqdev123@localhost:5432/doctor_onboarding"
         return v
-    
+
     @model_validator(mode="after")
     def validate_production_settings(self) -> "Settings":
         """Validate settings for production environment."""

@@ -12,36 +12,35 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Path, status
+from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ....db.session import get_db
-from ....core.responses import GenericResponse
-from ....core.exceptions import NotFoundError, BadRequestError, ConflictError
+from ....core.exceptions import BadRequestError, ConflictError, NotFoundError
 from ....core.rbac import AdminOrOperationalUser
+from ....core.responses import GenericResponse
+from ....db.session import get_db
+from ....models.hospital import HospitalVerificationStatus as ModelHospitalVerificationStatus
+from ....repositories.hospital_repository import (
+    DoctorHospitalAffiliationRepository,
+    HospitalRepository,
+)
 from ....schemas.hospital import (
-    HospitalCreate,
-    HospitalUpdate,
-    HospitalVerify,
-    HospitalResponse,
-    HospitalListResponse,
-    HospitalSearchResult,
-    HospitalStats,
     AffiliationCreate,
     AffiliationCreateWithNewHospital,
-    AffiliationUpdate,
     AffiliationResponse,
+    AffiliationUpdate,
     AffiliationWithHospitalResponse,
     DoctorPracticeLocationsResponse,
+    HospitalCreate,
+    HospitalListResponse,
     HospitalMerge,
+    HospitalResponse,
+    HospitalSearchResult,
+    HospitalStats,
+    HospitalUpdate,
     HospitalVerificationStatus,
+    HospitalVerify,
 )
-from ....repositories.hospital_repository import (
-    HospitalRepository,
-    DoctorHospitalAffiliationRepository,
-)
-from ....models.hospital import HospitalVerificationStatus as ModelHospitalVerificationStatus
-
 
 logger = logging.getLogger(__name__)
 
@@ -66,49 +65,6 @@ async def get_affiliation_repo(
     return DoctorHospitalAffiliationRepository(db)
 
 
-# =============================================================================
-# Search Endpoints (Public - for onboarding dropdown)
-# =============================================================================
-
-@router.get(
-    "/search",
-    response_model=GenericResponse[list[HospitalSearchResult]],
-    summary="Search hospitals for autocomplete",
-    description="Search verified hospitals by name. Used for dropdown during doctor onboarding.",
-)
-async def search_hospitals(
-    q: Annotated[str, Query(min_length=1, description="Search query (hospital name)")],
-    city: Annotated[str | None, Query(description="Filter by city")] = None,
-    state: Annotated[str | None, Query(description="Filter by state")] = None,
-    limit: Annotated[int, Query(ge=1, le=50, description="Max results")] = 20,
-    repo: HospitalRepository = Depends(get_hospital_repo),
-) -> GenericResponse[list[HospitalSearchResult]]:
-    """Search hospitals for autocomplete dropdown."""
-    hospitals = await repo.search(
-        query=q,
-        city=city,
-        state=state,
-        verified_only=True,
-        active_only=True,
-        limit=limit,
-    )
-    
-    results = [
-        HospitalSearchResult(
-            id=h.id,
-            name=h.name,
-            city=h.city,
-            state=h.state,
-            display_name=f"{h.name}, {h.city}" if h.city else h.name,
-        )
-        for h in hospitals
-    ]
-    
-    return GenericResponse(
-        message=f"Found {len(results)} hospitals",
-        data=results,
-    )
-
 
 @router.get(
     "/{hospital_id}",
@@ -123,7 +79,7 @@ async def get_hospital(
     hospital = await repo.get_by_id(hospital_id)
     if not hospital:
         raise NotFoundError(message=f"Hospital with ID {hospital_id} not found")
-    
+
     return GenericResponse(
         message="Hospital retrieved successfully",
         data=HospitalResponse.model_validate(hospital),
@@ -160,9 +116,9 @@ async def create_hospital(
         created_by_doctor_id=doctor_id,
         verification_status=ModelHospitalVerificationStatus.PENDING,
     )
-    
+
     await db.commit()
-    
+
     return GenericResponse(
         message="Hospital added successfully. Pending verification." if doctor_id else "Hospital created successfully.",
         data=HospitalResponse.model_validate(hospital),
@@ -175,23 +131,55 @@ async def create_hospital(
 
 @router.get(
     "",
-    response_model=GenericResponse[list[HospitalListResponse]],
-    summary="List all hospitals",
+    response_model=GenericResponse[list[HospitalListResponse | HospitalSearchResult | HospitalResponse]],
+    summary="List or search hospitals",
 )
 async def list_hospitals(
+    q: Annotated[str | None, Query(description="Search query (hospital name)")] = None,
     skip: Annotated[int, Query(ge=0, description="Skip N records")] = 0,
     limit: Annotated[int, Query(ge=1, le=100, description="Max records")] = 50,
-    verification_status: Annotated[HospitalVerificationStatus | None, Query(description="Filter by status")] = None,
+    verification_status: Annotated[HospitalVerificationStatus | None, Query(description="Filter by status (e.g. pending)")] = None,
     city: Annotated[str | None, Query(description="Filter by city")] = None,
     state: Annotated[str | None, Query(description="Filter by state")] = None,
     include_inactive: Annotated[bool, Query(description="Include inactive hospitals")] = False,
+    autocomplete: Annotated[bool, Query(description="Return lightweight autocomplete format")] = False,
     repo: HospitalRepository = Depends(get_hospital_repo),
-) -> GenericResponse[list[HospitalListResponse]]:
-    """List hospitals with filters (admin view)."""
+) -> GenericResponse[list[Any]]:
+    """List or search hospitals with optional filters (replaces /search and /admin/pending)."""
+    
+    # Handle search/autocomplete specifically
+    if q and autocomplete:
+        hospitals = await repo.search(
+            query=q,
+            city=city,
+            state=state,
+            verified_only=True,
+            active_only=True,
+            limit=limit,
+        )
+        results = [
+            HospitalSearchResult(
+                id=h.id,
+                name=h.name,
+                city=h.city,
+                state=h.state,
+                display_name=f"{h.name}, {h.city}" if h.city else h.name,
+            )
+            for h in hospitals
+        ]
+        return GenericResponse(message=f"Found {len(results)} hospitals", data=results)
+
+    # Standard list/filter operations
     model_status = None
     if verification_status:
         model_status = ModelHospitalVerificationStatus(verification_status.value)
-    
+        
+        # If explicitly requesting pending, return full HospitalResponse models like /admin/pending did
+        if model_status == ModelHospitalVerificationStatus.PENDING:
+            hospitals, total = await repo.list_pending(skip=skip, limit=limit)
+            results = [HospitalResponse.model_validate(h) for h in hospitals]
+            return GenericResponse(message=f"Found {total} hospitals pending verification", data=results)
+
     hospitals, total = await repo.list_all(
         skip=skip,
         limit=limit,
@@ -200,32 +188,11 @@ async def list_hospitals(
         city=city,
         state=state,
     )
-    
+
     results = [HospitalListResponse.model_validate(h) for h in hospitals]
-    
+
     return GenericResponse(
         message=f"Retrieved {len(results)} of {total} hospitals",
-        data=results,
-    )
-
-
-@router.get(
-    "/admin/pending",
-    response_model=GenericResponse[list[HospitalResponse]],
-    summary="List pending hospitals (admin)",
-)
-async def list_pending_hospitals(
-    admin: AdminOrOperationalUser,  # Require admin or operational role
-    skip: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    repo: HospitalRepository = Depends(get_hospital_repo),
-) -> GenericResponse[list[HospitalResponse]]:
-    """List hospitals pending verification (admin view). Requires admin or operational role."""
-    hospitals, total = await repo.list_pending(skip=skip, limit=limit)
-    results = [HospitalResponse.model_validate(h) for h in hospitals]
-    
-    return GenericResponse(
-        message=f"Found {total} hospitals pending verification",
         data=results,
     )
 
@@ -266,13 +233,13 @@ async def update_hospital(
     update_data = hospital_data.model_dump(exclude_unset=True)
     if not update_data:
         raise BadRequestError(message="No update data provided")
-    
+
     hospital = await repo.update(hospital_id, **update_data)
     if not hospital:
         raise NotFoundError(message=f"Hospital with ID {hospital_id} not found")
-    
+
     await db.commit()
-    
+
     return GenericResponse(
         message="Hospital updated successfully",
         data=HospitalResponse.model_validate(hospital),
@@ -293,9 +260,9 @@ async def delete_hospital(
     deleted = await repo.soft_delete(hospital_id)
     if not deleted:
         raise NotFoundError(message=f"Hospital with ID {hospital_id} not found")
-    
+
     await db.commit()
-    
+
     return GenericResponse(
         message="Hospital deleted successfully",
         data={"hospital_id": hospital_id},
@@ -321,7 +288,7 @@ async def verify_hospital(
     """Verify or reject a hospital (admin action). Requires admin or operational role."""
     if verification.action == "reject" and not verification.rejection_reason:
         raise BadRequestError(message="Rejection reason is required when rejecting a hospital")
-    
+
     if verification.action == "verify":
         hospital = await repo.verify(
             hospital_id=hospital_id,
@@ -335,12 +302,12 @@ async def verify_hospital(
             rejected_by=verification.verified_by,
         )
         message = "Hospital rejected"
-    
+
     if not hospital:
         raise NotFoundError(message=f"Hospital with ID {hospital_id} not found")
-    
+
     await db.commit()
-    
+
     return GenericResponse(
         message=message,
         data=HospitalResponse.model_validate(hospital),
@@ -363,23 +330,23 @@ async def merge_hospitals(
     target = await repo.get_by_id(merge_data.target_hospital_id)
     if not target:
         raise NotFoundError(message=f"Target hospital with ID {merge_data.target_hospital_id} not found")
-    
+
     # Validate sources exist and are different from target
     if merge_data.target_hospital_id in merge_data.source_hospital_ids:
         raise BadRequestError(message="Target hospital cannot be in source list")
-    
+
     for source_id in merge_data.source_hospital_ids:
         source = await repo.get_by_id(source_id)
         if not source:
             raise NotFoundError(message=f"Source hospital with ID {source_id} not found")
-    
+
     affiliations_moved = await repo.merge_hospitals(
         source_ids=merge_data.source_hospital_ids,
         target_id=merge_data.target_hospital_id,
     )
-    
+
     await db.commit()
-    
+
     return GenericResponse(
         message=f"Merged {len(merge_data.source_hospital_ids)} hospitals, moved {affiliations_moved} affiliations",
         data={
@@ -412,7 +379,7 @@ async def create_affiliation(
     hospital = await hospital_repo.get_by_id(affiliation_data.hospital_id)
     if not hospital:
         raise NotFoundError(message=f"Hospital with ID {affiliation_data.hospital_id} not found")
-    
+
     # Check if affiliation already exists
     existing = await affiliation_repo.get_by_doctor_and_hospital(
         doctor_id=doctor_id,
@@ -420,7 +387,7 @@ async def create_affiliation(
     )
     if existing:
         raise ConflictError(message="Doctor is already affiliated with this hospital")
-    
+
     affiliation = await affiliation_repo.create(
         doctor_id=doctor_id,
         hospital_id=affiliation_data.hospital_id,
@@ -431,12 +398,12 @@ async def create_affiliation(
         department=affiliation_data.department,
         is_primary=affiliation_data.is_primary,
     )
-    
+
     await db.commit()
-    
+
     # Reload with hospital
     affiliation = await affiliation_repo.get_by_id(affiliation.id)
-    
+
     return GenericResponse(
         message="Affiliation created successfully",
         data=AffiliationResponse.model_validate(affiliation),
@@ -468,7 +435,7 @@ async def create_affiliation_with_new_hospital(
         created_by_doctor_id=doctor_id,
         verification_status=ModelHospitalVerificationStatus.PENDING,
     )
-    
+
     # Create the affiliation
     affiliation = await affiliation_repo.create(
         doctor_id=doctor_id,
@@ -480,12 +447,12 @@ async def create_affiliation_with_new_hospital(
         department=data.department,
         is_primary=data.is_primary,
     )
-    
+
     await db.commit()
-    
+
     # Reload with hospital
     affiliation = await affiliation_repo.get_by_id(affiliation.id)
-    
+
     return GenericResponse(
         message="Hospital added (pending verification) and affiliation created",
         data=AffiliationResponse.model_validate(affiliation),
@@ -508,7 +475,7 @@ async def get_doctor_affiliations(
         active_only=True,
         include_unverified_hospitals=include_unverified,
     )
-    
+
     # Convert to response with nested hospital
     affiliation_responses = []
     for a in affiliations:
@@ -528,7 +495,7 @@ async def get_doctor_affiliations(
             "hospital": HospitalResponse.model_validate(a.hospital) if a.hospital else None,
         }
         affiliation_responses.append(AffiliationWithHospitalResponse(**aff_dict))
-    
+
     return GenericResponse(
         message=f"Retrieved {len(affiliations)} practice locations",
         data=DoctorPracticeLocationsResponse(
@@ -553,9 +520,9 @@ async def get_hospital_doctors(
         hospital_id=hospital_id,
         active_only=True,
     )
-    
+
     results = [AffiliationResponse.model_validate(a) for a in affiliations]
-    
+
     return GenericResponse(
         message=f"Found {len(results)} doctors at this hospital",
         data=results,
@@ -577,13 +544,13 @@ async def update_affiliation(
     update_data = data.model_dump(exclude_unset=True)
     if not update_data:
         raise BadRequestError(message="No update data provided")
-    
+
     affiliation = await affiliation_repo.update(affiliation_id, **update_data)
     if not affiliation:
         raise NotFoundError(message=f"Affiliation with ID {affiliation_id} not found")
-    
+
     await db.commit()
-    
+
     return GenericResponse(
         message="Affiliation updated successfully",
         data=AffiliationResponse.model_validate(affiliation),
@@ -604,9 +571,9 @@ async def delete_affiliation(
     deleted = await affiliation_repo.soft_delete(affiliation_id)
     if not deleted:
         raise NotFoundError(message=f"Affiliation with ID {affiliation_id} not found")
-    
+
     await db.commit()
-    
+
     return GenericResponse(
         message="Affiliation removed successfully",
         data={"affiliation_id": affiliation_id},

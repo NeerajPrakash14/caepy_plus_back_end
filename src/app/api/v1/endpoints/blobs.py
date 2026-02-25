@@ -11,7 +11,8 @@ import logging
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path as PathParam, status
+from fastapi import APIRouter, HTTPException, status
+from fastapi import Path as PathParam
 from fastapi.responses import FileResponse, Response
 
 from ....core.responses import GenericResponse
@@ -45,17 +46,17 @@ async def get_blob(
     - blob_filename: the unique blob ID with file extension
     """
     blob_service = get_blob_storage_service()
-    
+
     # Construct the file path
     blob_path = blob_service.base_path / str(doctor_id) / media_category / blob_filename
-    
+
     if not blob_path.exists():
         logger.warning(f"Blob not found: {blob_path}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Blob not found",
         )
-    
+
     # Determine media type from extension
     extension = Path(blob_filename).suffix.lower()
     media_type_map = {
@@ -67,9 +68,9 @@ async def get_blob(
         ".webp": "image/webp",
     }
     media_type = media_type_map.get(extension, "application/octet-stream")
-    
+
     logger.info(f"Serving blob: {blob_path}")
-    
+
     return FileResponse(
         path=blob_path,
         media_type=media_type,
@@ -87,7 +88,7 @@ async def get_storage_stats() -> GenericResponse[dict]:
     """Get blob storage statistics."""
     blob_service = get_blob_storage_service()
     stats = blob_service.get_storage_stats()
-    
+
     return GenericResponse(
         message="Storage statistics retrieved",
         data=stats,
@@ -106,15 +107,15 @@ async def check_blob_exists(
 ) -> Response:
     """Check if a blob exists without downloading it."""
     blob_service = get_blob_storage_service()
-    
+
     blob_path = blob_service.base_path / str(doctor_id) / media_category / blob_filename
-    
+
     if not blob_path.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Blob not found",
         )
-    
+
     # Return file size in header
     file_size = blob_path.stat().st_size
     return Response(

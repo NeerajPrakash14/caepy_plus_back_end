@@ -14,18 +14,15 @@ with cloud implementations without changing the interface.
 """
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import logging
 import mimetypes
-import os
 import uuid
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import BinaryIO, Protocol
+from typing import Protocol
 from urllib.parse import urlparse
 
 import aiofiles
@@ -35,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 try:
     import aioboto3
-    from botocore.exceptions import ClientError, BotoCoreError
+    from botocore.exceptions import BotoCoreError, ClientError
     S3_AVAILABLE = True
 except ImportError:
     S3_AVAILABLE = False
@@ -304,7 +301,7 @@ class LocalBlobStorageService:
 
         except aiohttp.ClientError as e:
             raise BlobDownloadError(f"Network error downloading file: {e}", e)
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             raise BlobDownloadError(f"Timeout downloading file from {url}", e)
 
     async def _write_blob(
@@ -481,7 +478,7 @@ class LocalBlobStorageService:
         metadata_path = self._get_metadata_path(blob_path)
         metadata_dict = {}
         if metadata_path.exists():
-            async with aiofiles.open(metadata_path, "r") as f:
+            async with aiofiles.open(metadata_path) as f:
                 for line in (await f.read()).strip().split("\n"):
                     if "=" in line:
                         key, value = line.split("=", 1)
@@ -543,7 +540,8 @@ class LocalBlobStorageService:
 # This will be added to blob_storage_service.py
 
 import aioboto3
-from botocore.exceptions import ClientError, BotoCoreError
+from botocore.exceptions import BotoCoreError, ClientError
+
 
 class S3BlobStorageService:
     """
@@ -562,11 +560,11 @@ class S3BlobStorageService:
     - Set lifecycle policies for cost optimization
     - Monitor S3 costs and usage
     """
-    
+
     CHUNK_SIZE = 8192
     MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024  # 50MB
     DOWNLOAD_TIMEOUT = 60
-    
+
     def __init__(
         self,
         bucket_name: str,
@@ -589,23 +587,23 @@ class S3BlobStorageService:
             use_signed_urls: Whether to generate signed URLs
             signed_url_expiry: Signed URL expiry in seconds
         """
-        self.bucket_name = bucket_name  
+        self.bucket_name = bucket_name
         self.access_key_id = access_key_id
         self.secret_access_key = secret_access_key
         self.region = region
         self.prefix = prefix.strip("/")
         self.use_signed_urls = use_signed_urls
         self.signed_url_expiry = signed_url_expiry
-        
+
         # aioboto3 session
         self.session = aioboto3.Session(
             aws_access_key_id=access_key_id,
             aws_secret_access_key=secret_access_key,
             region_name=region,
         )
-        
+
         logger.info(f"S3 blob storage initialized: bucket={bucket_name}, region={region}, prefix={prefix}")
-    
+
     def _get_s3_key(
         self,
         doctor_id: int,
@@ -616,19 +614,19 @@ class S3BlobStorageService:
         """Generate S3 object key."""
         # Format: {prefix}/{doctor_id}/{category}/{blob_id}{extension}
         return f"{self.prefix}/{doctor_id}/{media_category}/{blob_id}{extension}"
-    
+
     @staticmethod
     def _compute_hash(content: bytes) -> str:
         """Compute SHA-256 hash."""
         return hashlib.sha256(content).hexdigest()
-    
+
     @staticmethod
     def _detect_mime_type(file_name: str, content: bytes | None = None) -> str:
         """Detect MIME type."""
         mime_type, _ = mimetypes.guess_type(file_name)
         if mime_type:
             return mime_type
-        
+
         extension = Path(file_name).suffix.lower()
         mime_map = {
             ".pdf": "application/pdf",
@@ -639,13 +637,13 @@ class S3BlobStorageService:
             ".webp": "image/webp",
         }
         return mime_map.get(extension, "application/octet-stream")
-    
+
     @staticmethod
     def _get_extension(file_name: str) -> str:
         """Extract file extension."""
         ext = Path(file_name).suffix.lower()
         return ext if ext else ".bin"
-    
+
     async def _download_from_url(self, url: str) -> tuple[bytes, str]:
         """Download file from external URL."""
         try:
@@ -656,27 +654,27 @@ class S3BlobStorageService:
                         raise BlobDownloadError(
                             f"Failed to download from {url}: HTTP {response.status}"
                         )
-                    
+
                     content = await response.read()
-                    
+
                     if len(content) > self.MAX_DOWNLOAD_SIZE:
                         raise BlobDownloadError(
                             f"File too large: {len(content)} bytes (max {self.MAX_DOWNLOAD_SIZE})"
                         )
-                    
+
                     # Extract filename from URL or Content-Disposition
                     filename = Path(urlparse(url).path).name
                     if content_disposition := response.headers.get("Content-Disposition"):
                         if "filename=" in content_disposition:
                             filename = content_disposition.split("filename=")[-1].strip('"')
-                    
+
                     return content, filename
-                    
+
         except aiohttp.ClientError as e:
             raise BlobDownloadError(f"Download failed: {str(e)}", e)
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             raise BlobDownloadError(f"Download timeout after {self.DOWNLOAD_TIMEOUT}s", e)
-    
+
     async def upload_from_url(
         self,
         source_url: str,
@@ -688,20 +686,20 @@ class S3BlobStorageService:
         try:
             # Download content
             content, suggested_filename = await self._download_from_url(source_url)
-            
+
             # Use suggested filename if provided
             if not file_name or file_name == "unknown":
                 file_name = suggested_filename
-            
+
             # Upload to S3
             return await self. upload_from_bytes(content, file_name, doctor_id, media_category)
-            
+
         except BlobDownloadError:
             raise
         except Exception as e:
             logger.exception(f"Failed to upload from URL: {source_url}")
             raise BlobUploadError(f"Upload from URL failed: {str(e)}", e)
-    
+
     async def upload_from_bytes(
         self,
         content: bytes,
@@ -717,10 +715,10 @@ class S3BlobStorageService:
             mime_type = self._detect_mime_type(file_name, content)
             extension = self._get_extension(file_name)
             file_size = len(content)
-            
+
             # Generate S3 key
             s3_key = self._get_s3_key(doctor_id, media_category, blob_id, extension)
-            
+
             # Upload to S3
             async with self.session.client("s3") as s3_client:
                 await s3_client.put_object(
@@ -736,14 +734,14 @@ class S3BlobStorageService:
                         "media-category": media_category,
                     },
                 )
-            
+
             # Generate URL
             file_uri = await self.get_blob_uri(blob_id, doctor_id, media_category, extension)
-            
+
             logger.info(
                 f"Uploaded to S3: blob_id={blob_id}, key={s3_key}, size={file_size}"
             )
-            
+
             return UploadResult(
                 success=True,
                 blob_id=blob_id,
@@ -752,7 +750,7 @@ class S3BlobStorageService:
                 mime_type=mime_type,
                 content_hash=content_hash,
             )
-            
+
         except (ClientError, BotoCoreError) as e:
             logger.exception(f"S3 upload failed for {file_name}")
             return UploadResult(
@@ -765,22 +763,22 @@ class S3BlobStorageService:
                 error_message=f"S3 upload failed: {str(e)}",
             )
         except Exception as e:
-            logger.exception(f"Unexpected error uploading to S3")
+            logger.exception("Unexpected error uploading to S3")
             raise BlobUploadError(f"Upload failed: {str(e)}", e)
-    
+
     async def get_blob(self, blob_id: str, doctor_id: int, media_category: str, extension: str) -> tuple[bytes, BlobMetadata]:
         """Retrieve blob from S3."""
         try:
             s3_key = self._get_s3_key(doctor_id, media_category, blob_id, extension)
-            
+
             async with self.session.client("s3") as s3_client:
                 response = await s3_client.get_object(
                     Bucket=self.bucket_name,
                     Key=s3_key,
                 )
-                
+
                 content = await response["Body"].read()
-                
+
                 metadata = BlobMetadata(
                     blob_id=blob_id,
                     file_name=response.get("Metadata", {}).get("original-filename", "unknown"),
@@ -791,40 +789,40 @@ class S3BlobStorageService:
                     created_at=response["LastModified"],
                     storage_backend=StorageBackend.S3,
                 )
-                
+
                 return content, metadata
-                
+
         except s3_client.exceptions.NoSuchKey:
             raise BlobNotFoundError(f"Blob not found: {blob_id}")
         except (ClientError, BotoCoreError) as e:
             raise BlobStorageError(f"S3 retrieval failed: {str(e)}", e)
-    
+
     async def delete_blob(self, blob_id: str, doctor_id: int, media_category: str, extension: str) -> bool:
         """Delete blob from S3."""
         try:
             s3_key = self._get_s3_key(doctor_id, media_category, blob_id, extension)
-            
+
             async with self.session.client("s3") as s3_client:
                 await s3_client.delete_object(
                     Bucket=self.bucket_name,
                     Key=s3_key,
                 )
-            
+
             logger.info(f"Deleted from S3: key={s3_key}")
             return True
-            
+
         except (ClientError, BotoCoreError) as e:
             logger.error(f"S3 deletion failed: {str(e)}")
             return False
-    
+
     async def get_blob_uri(self, blob_id: str, doctor_id: int = 0, media_category: str = "", extension: str = "") -> str:
         """Generate S3 URL (public or signed)."""
         if not doctor_id or not media_category or not extension:
             # For compatibility, return a placeholder
             return f"s3://{self.bucket_name}/{blob_id}"
-        
+
         s3_key = self._get_s3_key(doctor_id, media_category, blob_id, extension)
-        
+
         if self.use_signed_urls:
             # Generate signed URL
             async with self.session.client("s3") as s3_client:
@@ -840,19 +838,19 @@ class S3BlobStorageService:
         else:
             # Return public URL
             return f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{s3_key}"
-    
+
     async def blob_exists(self, blob_id: str, doctor_id: int, media_category: str, extension: str) -> bool:
         """Check if blob exists in S3."""
         try:
             s3_key = self._get_s3_key(doctor_id, media_category, blob_id, extension)
-            
+
             async with self.session.client("s3") as s3_client:
                 await s3_client.head_object(
                     Bucket=self.bucket_name,
                     Key=s3_key,
                 )
             return True
-            
+
         except s3_client.exceptions.NoSuchKey:
             return False
         except (ClientError, BotoCoreError):
@@ -870,7 +868,7 @@ class BlobStorageFactory:
     Selects the appropriate storage backend based on configuration.
     Supports local filesystem and AWS S3 storage.
     """
-    
+
     @staticmethod
     def create_blob_service(settings) -> LocalBlobStorageService | S3BlobStorageService:
         """
@@ -886,14 +884,14 @@ class BlobStorageFactory:
             ValueError: If storage backend is invalid or required settings are missing
         """
         backend = settings.STORAGE_BACKEND.lower()
-        
+
         if backend == "local":
             logger.info("Initializing local blob storage")
             return LocalBlobStorageService(
                 base_path=settings.BLOB_STORAGE_PATH,
                 base_url=settings.BLOB_BASE_URL,
             )
-        
+
         elif backend == "s3":
             # Validate S3 settings
             if not settings.AWS_S3_BUCKET:
@@ -911,7 +909,7 @@ class BlobStorageFactory:
                     "AWS_SECRET_ACCESS_KEY is required when STORAGE_BACKEND=s3. "
                     "Set it in your .env file or environment variables."
                 )
-            
+
             logger.info(f"Initializing S3 blob storage: bucket={settings.AWS_S3_BUCKET}, region={settings.AWS_REGION}")
             return S3BlobStorageService(
                 bucket_name=settings.AWS_S3_BUCKET,
@@ -922,7 +920,7 @@ class BlobStorageFactory:
                 use_signed_urls=settings.AWS_S3_USE_SIGNED_URLS,
                 signed_url_expiry=settings.AWS_S3_SIGNED_URL_EXPIRY,
             )
-        
+
         else:
             raise ValueError(
                 f"Invalid STORAGE_BACKEND: '{backend}'. "
@@ -953,13 +951,13 @@ def get_blob_storage_service() -> LocalBlobStorageService | S3BlobStorageService
         ValueError: If storage configuration is invalid
     """
     global _blob_storage_instance
-    
+
     if _blob_storage_instance is None:
         from ..core.config import get_settings
-        
+
         settings = get_settings()
         _blob_storage_instance = BlobStorageFactory.create_blob_service(settings)
-    
+
     return _blob_storage_instance
 
 

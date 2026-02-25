@@ -51,7 +51,7 @@ class QualificationResponse(BaseModel):
     """Schema for qualification in responses."""
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-    
+
     id: int | None = None  # Optional since qualifications are stored as JSON, not separate table rows
     degree: str = Field(validation_alias="degree_name", serialization_alias="degree")
     institution: str | None = Field(validation_alias="institution", serialization_alias="institution")
@@ -80,7 +80,7 @@ class PracticeLocationCreate(PracticeLocationBase):
 class DoctorBase(BaseModel):
     """Base schema with common doctor fields."""
 
-    
+
     # Block 1: Professional Identity
     full_name: str | None = None
     specialty: str | None = None
@@ -132,24 +132,24 @@ class DoctorBase(BaseModel):
     email: EmailStr = Field(description="Email address (must be unique)")
     phone_number: str | None = Field(default=None, max_length=30, description="Phone number")
     primary_specialization: str = Field(
-        min_length=1, 
-        max_length=200, 
+        min_length=1,
+        max_length=200,
         description="Primary medical specialization"
     )
     years_of_experience: int | None = Field(
-        default=None, 
-        ge=0, 
-        le=100, 
+        default=None,
+        ge=0,
+        le=100,
         description="Years of practice"
     )
     consultation_fee: float | None = Field(
-        default=None, 
-        ge=0, 
+        default=None,
+        ge=0,
         description="Consultation fee"
     )
     medical_registration_number: str = Field(
-        min_length=1, 
-        max_length=100, 
+        min_length=1,
+        max_length=100,
         description="Medical registration/license number"
     )
     registration_year: int | None = Field(
@@ -177,7 +177,7 @@ class DoctorBase(BaseModel):
     achievement_images: list[str] = Field(default_factory=list, description="Achievement image URLs")
     external_links: list[str] = Field(default_factory=list, description="External profile links")
     practice_locations: list[PracticeLocationBase] = Field(
-        default_factory=list, 
+        default_factory=list,
         description="Practice locations"
     )
 
@@ -187,23 +187,23 @@ class DoctorCreate(DoctorBase):
     
     Used in POST /api/v1/doctors endpoint.
     """
-    
+
     onboarding_source: OnboardingSource | None = Field(
-        default=None, 
+        default=None,
         description="Source of onboarding data"
     )
     resume_url: str | None = Field(default=None, description="URL to uploaded resume")
     raw_extraction_data: dict | None = Field(
-        default=None, 
+        default=None,
         description="Raw AI extraction output"
     )
-    
+
     @field_validator("email")
     @classmethod
     def normalize_email(cls, v: str) -> str:
         """Normalize email to lowercase."""
         return v.lower().strip()
-    
+
     @field_validator("first_name", "last_name")
     @classmethod
     def normalize_names(cls, v: str) -> str:
@@ -216,7 +216,7 @@ class DoctorUpdate(BaseModel):
     
     All fields are optional - only provided fields are updated.
     """
-    
+
     # Block 1: Professional Identity
     full_name: str | None = None
     specialty: str | None = None
@@ -295,9 +295,9 @@ class DoctorResponse(BaseModel):
     Includes all fields plus database-generated fields.
     """
 
-    
+
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-    
+
     id: int
     title: str | None = None
     gender: str | None = None
@@ -331,7 +331,7 @@ class DoctorResponse(BaseModel):
     role: str = "user"
     created_at: datetime | None = None
     updated_at: datetime | None = None
-    
+
     # Block 1: Professional Identity
     full_name: str | None = None
     specialty: str | None = None
@@ -380,9 +380,9 @@ class DoctorSummary(BaseModel):
     
     Used in list endpoints to reduce payload size.
     """
-    
+
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: int
     title: str | None = None
     first_name: str | None = None
@@ -441,7 +441,7 @@ class ResumeExtractedData(BaseModel):
     
     This schema matches the AI extraction output format.
     """
-    
+
     personal_details: PersonalDetails = Field(default_factory=PersonalDetails)
     professional_information: ProfessionalInformation = Field(default_factory=ProfessionalInformation)
     registration: Registration = Field(default_factory=Registration)
@@ -449,7 +449,7 @@ class ResumeExtractedData(BaseModel):
     achievements: Achievements = Field(default_factory=Achievements)
     media: Media = Field(default_factory=Media)
     practice_locations: list[PracticeLocationBase] = Field(default_factory=list)
-    
+
     def to_doctor_create(self, source: OnboardingSource = OnboardingSource.RESUME) -> DoctorCreate:
         """Convert extracted data to DoctorCreate schema."""
         # Convert qualifications from structured format to strings
@@ -461,7 +461,7 @@ class ResumeExtractedData(BaseModel):
             for q in self.qualifications
             if q.degree
         ]
-        
+
         return DoctorCreate(
             title=self.personal_details.title,
             gender=self.personal_details.gender,
@@ -500,7 +500,7 @@ class ResumeExtractedData(BaseModel):
 
 class ExtractionResponse(BaseModel):
     """Response from resume extraction endpoint."""
-    
+
     success: bool = True
     message: str
     data: ResumeExtractedData | None = None
@@ -508,13 +508,13 @@ class ExtractionResponse(BaseModel):
 
 class ProfileContentRequest(DoctorBase):
     """Request payload for generating profile content from onboarding fields."""
-    
+
     # Optional: Specify doctor identifier for session tracking
     doctor_identifier: str | None = Field(
         default=None,
         description="Unique identifier for the doctor (email or ID) for variant session tracking"
     )
-    
+
     # Optional: Specify which sections to regenerate (if not provided, all sections generated)
     sections: list[str] | None = Field(
         default=None,
@@ -528,7 +528,7 @@ class ProfileContentResponse(BaseModel):
     professional_overview: str | None = None
     about_me: str | None = None
     professional_tagline: str | None = None
-    
+
     # Metadata about variants used (for debugging/tracking)
     variants_used: dict[str, int] | None = Field(
         default=None,
@@ -538,7 +538,7 @@ class ProfileContentResponse(BaseModel):
 
 class ProfileSessionStatsResponse(BaseModel):
     """Response for prompt session statistics."""
-    
+
     doctor_identifier: str
     sections: dict[str, dict[str, Any]]
     total_regenerations: int = 0

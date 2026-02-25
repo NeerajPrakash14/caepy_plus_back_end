@@ -3,18 +3,17 @@
 Public and admin endpoints for managing doctor testimonials displayed on the homepage carousel.
 """
 import logging
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 
 from ....core.responses import GenericResponse
 from ....db.session import DbSession
 from ....repositories.testimonial_repository import TestimonialRepository
 from ....schemas.testimonial import (
     TestimonialCreate,
-    TestimonialUpdate,
-    TestimonialResponse,
     TestimonialListResponse,
+    TestimonialResponse,
+    TestimonialUpdate,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,52 +28,27 @@ router = APIRouter(prefix="/testimonials")
 @router.get(
     "",
     response_model=GenericResponse[TestimonialListResponse],
-    summary="Get active testimonials for homepage",
-    description="Returns list of active doctor testimonials for the homepage carousel. Ordered by display_order.",
+    summary="Get testimonials",
+    description="Returns list of testimonials. Ordered by display_order. Active only by default.",
 )
 async def list_testimonials(
     db: DbSession,
     skip: int = Query(default=0, ge=0, description="Number of records to skip"),
     limit: int = Query(default=20, ge=1, le=100, description="Maximum number of records to return"),
+    include_inactive: bool = Query(default=False, description="Include inactive testimonials (Admin only conceptually)"),
 ) -> GenericResponse[TestimonialListResponse]:
-    """Get active testimonials for public display."""
+    """Get testimonials."""
     repo = TestimonialRepository(db)
-    
-    testimonials = await repo.list_active(skip=skip, limit=limit)
-    total = await repo.count_active()
-    
+
+    if include_inactive:
+        testimonials = await repo.list_all(skip=skip, limit=limit)
+        total = await repo.count_all()
+    else:
+        testimonials = await repo.list_active(skip=skip, limit=limit)
+        total = await repo.count_active()
+
     return GenericResponse(
         message="Testimonials retrieved successfully",
-        data=TestimonialListResponse(
-            testimonials=[TestimonialResponse.model_validate(t) for t in testimonials],
-            total=total,
-        ),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Admin endpoints (for managing testimonials)
-# ---------------------------------------------------------------------------
-
-@router.get(
-    "/admin",
-    response_model=GenericResponse[TestimonialListResponse],
-    summary="Get all testimonials (admin)",
-    description="Returns all testimonials including inactive ones. For admin management.",
-)
-async def list_all_testimonials(
-    db: DbSession,
-    skip: int = Query(default=0, ge=0),
-    limit: int = Query(default=50, ge=1, le=200),
-) -> GenericResponse[TestimonialListResponse]:
-    """Get all testimonials for admin view."""
-    repo = TestimonialRepository(db)
-    
-    testimonials = await repo.list_all(skip=skip, limit=limit)
-    total = await repo.count_all()
-    
-    return GenericResponse(
-        message="All testimonials retrieved",
         data=TestimonialListResponse(
             testimonials=[TestimonialResponse.model_validate(t) for t in testimonials],
             total=total,
@@ -93,14 +67,14 @@ async def get_testimonial(
 ) -> GenericResponse[TestimonialResponse]:
     """Get a single testimonial by ID."""
     repo = TestimonialRepository(db)
-    
+
     testimonial = await repo.get_by_id(testimonial_id)
     if not testimonial:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Testimonial not found: {testimonial_id}",
         )
-    
+
     return GenericResponse(
         message="Testimonial retrieved",
         data=TestimonialResponse.model_validate(testimonial),
@@ -119,7 +93,7 @@ async def create_testimonial(
 ) -> GenericResponse[TestimonialResponse]:
     """Create a new testimonial."""
     repo = TestimonialRepository(db)
-    
+
     testimonial = await repo.create(
         doctor_name=payload.doctor_name,
         comment=payload.comment,
@@ -132,9 +106,9 @@ async def create_testimonial(
         is_active=payload.is_active,
         display_order=payload.display_order,
     )
-    
+
     logger.info(f"Created testimonial: {testimonial.id} for {testimonial.doctor_name}")
-    
+
     return GenericResponse(
         message="Testimonial created successfully",
         data=TestimonialResponse.model_validate(testimonial),
@@ -153,19 +127,19 @@ async def update_testimonial(
 ) -> GenericResponse[TestimonialResponse]:
     """Update an existing testimonial."""
     repo = TestimonialRepository(db)
-    
+
     # Filter out None values
     update_data = payload.model_dump(exclude_unset=True)
-    
+
     testimonial = await repo.update(testimonial_id, **update_data)
     if not testimonial:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Testimonial not found: {testimonial_id}",
         )
-    
+
     logger.info(f"Updated testimonial: {testimonial_id}")
-    
+
     return GenericResponse(
         message="Testimonial updated successfully",
         data=TestimonialResponse.model_validate(testimonial),
@@ -183,16 +157,16 @@ async def delete_testimonial(
 ) -> GenericResponse[dict]:
     """Delete a testimonial."""
     repo = TestimonialRepository(db)
-    
+
     deleted = await repo.delete(testimonial_id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Testimonial not found: {testimonial_id}",
         )
-    
+
     logger.info(f"Deleted testimonial: {testimonial_id}")
-    
+
     return GenericResponse(
         message="Testimonial deleted successfully",
         data={"deleted": True, "id": testimonial_id},
@@ -210,17 +184,17 @@ async def toggle_testimonial_active(
 ) -> GenericResponse[TestimonialResponse]:
     """Toggle a testimonial's active/inactive status."""
     repo = TestimonialRepository(db)
-    
+
     testimonial = await repo.toggle_active(testimonial_id)
     if not testimonial:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Testimonial not found: {testimonial_id}",
         )
-    
+
     status_text = "activated" if testimonial.is_active else "deactivated"
     logger.info(f"Testimonial {testimonial_id} {status_text}")
-    
+
     return GenericResponse(
         message=f"Testimonial {status_text} successfully",
         data=TestimonialResponse.model_validate(testimonial),

@@ -2,8 +2,8 @@
 from .doctor_repository import DoctorRepository
 from .onboarding_repository import OnboardingRepository
 from .testimonial_repository import TestimonialRepository
-from .voice_config_repository import VoiceConfigRepository
 from .user_repository import UserRepository
+from .voice_config_repository import VoiceConfigRepository
 
 __all__ = [
     "DoctorRepository",

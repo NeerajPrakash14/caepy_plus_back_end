@@ -6,13 +6,12 @@ Handles:
 - SMS sending via onlysms.co.in API
 - OTP verification
 """
-import json
 import secrets
 import time
-from typing import Dict, Optional, Tuple
+from urllib.parse import quote
+
 import httpx
 import structlog
-from urllib.parse import quote
 
 from src.app.core.config import get_settings
 
@@ -36,7 +35,7 @@ class RedisOTPStore:
     - Distributed deployment support
     - Persistence across restarts
     """
-    
+
     def __init__(self, redis_url: str, prefix: str = "otp:", ttl_seconds: int = 300, max_attempts: int = 3):
         """
         Initialize Redis OTP store.
@@ -51,14 +50,14 @@ class RedisOTPStore:
         self._prefix = prefix
         self._ttl = ttl_seconds
         self._max_attempts = max_attempts
-        self._redis: Optional[aioredis.Redis] = None
+        self._redis: aioredis.Redis | None = None
         self._connected = False
-    
+
     async def connect(self) -> bool:
         """Connect to Redis. Returns True if successful."""
         if not REDIS_AVAILABLE:
             return False
-        
+
         try:
             self._redis = await aioredis.from_url(
                 self._redis_url,
@@ -74,37 +73,37 @@ class RedisOTPStore:
             logger.warning("Redis connection failed, will use in-memory fallback", error=str(e))
             self._connected = False
             return False
-    
+
     async def disconnect(self):
         """Disconnect from Redis."""
         if self._redis:
             await self._redis.close()
             self._connected = False
-    
+
     def _otp_key(self, mobile_number: str) -> str:
         """Generate Redis key for OTP storage."""
         return f"{self._prefix}{mobile_number}"
-    
+
     def _attempts_key(self, mobile_number: str) -> str:
         """Generate Redis key for attempt tracking."""
         return f"{self._prefix}attempts:{mobile_number}"
-    
+
     async def store_otp(self, mobile_number: str, otp: str) -> None:
         """Store OTP with TTL."""
         if not self._connected or not self._redis:
             raise ConnectionError("Redis not connected")
-        
+
         otp_key = self._otp_key(mobile_number)
         attempts_key = self._attempts_key(mobile_number)
-        
+
         # Store OTP with expiry
         await self._redis.setex(otp_key, self._ttl, otp)
         # Reset attempts counter
         await self._redis.setex(attempts_key, self._ttl, "0")
-        
+
         logger.debug("OTP stored in Redis", mobile=mobile_number[-4:], expires_in=self._ttl)
-    
-    async def verify_otp(self, mobile_number: str, otp: str) -> Tuple[bool, str]:
+
+    async def verify_otp(self, mobile_number: str, otp: str) -> tuple[bool, str]:
         """
         Verify OTP for mobile number.
         
@@ -113,36 +112,36 @@ class RedisOTPStore:
         """
         if not self._connected or not self._redis:
             raise ConnectionError("Redis not connected")
-        
+
         otp_key = self._otp_key(mobile_number)
         attempts_key = self._attempts_key(mobile_number)
-        
+
         # Get stored OTP
         stored_otp = await self._redis.get(otp_key)
-        
+
         if not stored_otp:
             return False, "OTP not found or expired. Please request a new OTP."
-        
+
         # Check attempts
         attempts_str = await self._redis.get(attempts_key) or "0"
         attempts = int(attempts_str)
-        
+
         if attempts >= self._max_attempts:
             # Delete OTP after max attempts
             await self._redis.delete(otp_key, attempts_key)
             return False, "Too many failed attempts. Please request a new OTP."
-        
+
         # Verify OTP
         if stored_otp != otp:
             # Increment attempts
             await self._redis.incr(attempts_key)
             remaining = self._max_attempts - attempts - 1
             return False, f"Invalid OTP. {remaining} attempts remaining."
-        
+
         # Success - clear OTP
         await self._redis.delete(otp_key, attempts_key)
         return True, "OTP verified successfully"
-    
+
     @property
     def is_connected(self) -> bool:
         """Check if Redis is connected."""
@@ -154,7 +153,7 @@ class InMemoryOTPStore:
     
     Used as fallback when Redis is unavailable.
     """
-    
+
     def __init__(self, ttl_seconds: int = 300, max_attempts: int = 3):
         """
         Initialize OTP store.
@@ -163,19 +162,19 @@ class InMemoryOTPStore:
             ttl_seconds: OTP validity period (default 5 minutes)
             max_attempts: Maximum verification attempts
         """
-        self._store: Dict[str, Tuple[str, float]] = {}  # {mobile: (otp, expiry_timestamp)}
+        self._store: dict[str, tuple[str, float]] = {}  # {mobile: (otp, expiry_timestamp)}
         self._ttl = ttl_seconds
-        self._attempts: Dict[str, int] = {}  # Track verification attempts
+        self._attempts: dict[str, int] = {}  # Track verification attempts
         self._max_attempts = max_attempts
-    
+
     async def store_otp(self, mobile_number: str, otp: str) -> None:
         """Store OTP with expiry timestamp."""
         expiry = time.time() + self._ttl
         self._store[mobile_number] = (otp, expiry)
         self._attempts[mobile_number] = 0  # Reset attempts on new OTP
         logger.debug("OTP stored in memory", mobile=mobile_number[-4:], expires_in=self._ttl)
-    
-    async def verify_otp(self, mobile_number: str, otp: str) -> Tuple[bool, str]:
+
+    async def verify_otp(self, mobile_number: str, otp: str) -> tuple[bool, str]:
         """
         Verify OTP for mobile number.
         
@@ -185,33 +184,33 @@ class InMemoryOTPStore:
         # Check if OTP exists
         if mobile_number not in self._store:
             return False, "OTP not found. Please request a new OTP."
-        
+
         stored_otp, expiry = self._store[mobile_number]
-        
+
         # Check expiry
         if time.time() > expiry:
             del self._store[mobile_number]
             self._attempts.pop(mobile_number, None)
             return False, "OTP has expired. Please request a new OTP."
-        
+
         # Check attempts
         attempts = self._attempts.get(mobile_number, 0)
         if attempts >= self._max_attempts:
             del self._store[mobile_number]
             self._attempts.pop(mobile_number, None)
             return False, "Too many failed attempts. Please request a new OTP."
-        
+
         # Verify OTP
         if stored_otp != otp:
             self._attempts[mobile_number] = attempts + 1
             remaining = self._max_attempts - attempts - 1
             return False, f"Invalid OTP. {remaining} attempts remaining."
-        
+
         # Success - clear OTP
         del self._store[mobile_number]
         self._attempts.pop(mobile_number, None)
         return True, "OTP verified successfully"
-    
+
     def cleanup_expired(self) -> int:
         """Remove expired OTPs. Returns count of removed entries."""
         current_time = time.time()
@@ -233,22 +232,22 @@ class OTPService:
     - Uses onlysms.co.in API for sending SMS
     - Automatic retry on Redis connection failure
     """
-    
+
     def __init__(self):
         self.settings = get_settings()
-        self._redis_store: Optional[RedisOTPStore] = None
-        self._memory_store: Optional[InMemoryOTPStore] = None
+        self._redis_store: RedisOTPStore | None = None
+        self._memory_store: InMemoryOTPStore | None = None
         self._initialized = False
         # HTTP client for SMS API - use default SSL verification
         self.http_client = httpx.AsyncClient(timeout=30.0)
-    
+
     async def _init_store(self) -> None:
         """Initialize OTP store (Redis with in-memory fallback)."""
         if self._initialized:
             return
-        
+
         settings = self.settings
-        
+
         # Try Redis first if enabled
         if settings.REDIS_ENABLED and REDIS_AVAILABLE:
             self._redis_store = RedisOTPStore(
@@ -262,7 +261,7 @@ class OTPService:
                 logger.info("Using Redis for OTP storage")
                 self._initialized = True
                 return
-        
+
         # Fallback to in-memory storage
         logger.info("Using in-memory OTP storage (Redis unavailable or disabled)")
         self._memory_store = InMemoryOTPStore(
@@ -270,27 +269,27 @@ class OTPService:
             max_attempts=settings.OTP_MAX_ATTEMPTS
         )
         self._initialized = True
-    
+
     async def _get_store(self):
         """Get the active OTP store."""
         await self._init_store()
         if self._redis_store and self._redis_store.is_connected:
             return self._redis_store
         return self._memory_store
-    
+
     def generate_otp(self, length: int = 6) -> str:
         """Generate a secure random OTP."""
         # Generate numeric OTP
         otp = "".join(secrets.choice("0123456789") for _ in range(length))
         return otp
-    
+
     def mask_mobile(self, mobile_number: str) -> str:
         """Mask mobile number for display (e.g., 98****3210)."""
         if len(mobile_number) >= 10:
             return f"{mobile_number[:2]}****{mobile_number[-4:]}"
         return "****"
-    
-    async def send_otp(self, mobile_number: str) -> Tuple[bool, str]:
+
+    async def send_otp(self, mobile_number: str) -> tuple[bool, str]:
         """
         Generate and send OTP to mobile number.
         
@@ -312,7 +311,7 @@ class OTPService:
 
             # Initialize store if needed
             store = await self._get_store()
-            
+
             # Generate OTP
             otp = self.generate_otp(length=self.settings.OTP_LENGTH)
 
@@ -328,7 +327,7 @@ class OTPService:
                 )
                 sms_message = self.settings.SMS_OTP_MESSAGE_TEMPLATE
             encoded_message = quote(sms_message)
-            
+
             # Build SMS API URL
             sms_url = (
                 f"{self.settings.SMS_API_BASE_URL}"
@@ -341,17 +340,17 @@ class OTPService:
                 f"&TEMPID={self.settings.SMS_TEMPLATE_ID}"
                 f"&UNICODE=TEXT"
             )
-            
+
             logger.info(
                 "Sending OTP",
                 mobile=self.mask_mobile(mobile_number),
                 otp_length=len(otp),
                 storage_type="redis" if isinstance(store, RedisOTPStore) else "memory"
             )
-            
+
             # Send SMS
             response = await self.http_client.get(sms_url)
-            
+
             # Log the actual response from SMS API for debugging
             response_text = response.text
             logger.info(
@@ -359,7 +358,7 @@ class OTPService:
                 status_code=response.status_code,
                 response_body=response_text[:500]
             )
-            
+
             if response.status_code == 200:
                 # strictly check for onlysms.co.in success response (starts with 100=)
                 # Success format: 100=Transaction_ID or 100=SuccessMsg
@@ -369,7 +368,7 @@ class OTPService:
                         response=response_text
                     )
                     return False, f"SMS API error: {response_text[:100]}"
-                
+
 
                 # Store OTP for verification
                 await store.store_otp(mobile_number, otp)
@@ -385,15 +384,15 @@ class OTPService:
                     response=response.text[:200]
                 )
                 return False, "Failed to send OTP. Please try again."
-                
+
         except httpx.TimeoutException:
             logger.error("SMS API timeout")
             return False, "SMS service timeout. Please try again."
         except Exception as e:
             logger.error("OTP send error", error=str(e))
             return False, f"Failed to send OTP: {str(e)}"
-    
-    async def verify_otp(self, mobile_number: str, otp: str) -> Tuple[bool, str]:
+
+    async def verify_otp(self, mobile_number: str, otp: str) -> tuple[bool, str]:
         """
         Verify OTP for mobile number.
         
@@ -406,13 +405,13 @@ class OTPService:
         """
         store = await self._get_store()
         return await store.verify_otp(mobile_number, otp)
-    
+
     async def close(self):
         """Close connections."""
         await self.http_client.aclose()
         if self._redis_store:
             await self._redis_store.disconnect()
-    
+
     def get_storage_info(self) -> dict:
         """Get information about current storage backend."""
         if self._redis_store and self._redis_store.is_connected:
@@ -422,7 +421,7 @@ class OTPService:
         return {"type": "none", "connected": False}
 
 # Service singleton
-_otp_service: Optional[OTPService] = None
+_otp_service: OTPService | None = None
 
 async def get_otp_service() -> OTPService:
     """Get or create OTP service singleton."""

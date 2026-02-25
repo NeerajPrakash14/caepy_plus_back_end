@@ -5,10 +5,10 @@ Defines request/response models for:
 - OTP verification (verify OTP and login)
 """
 
-from typing import Optional
-
 import re
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
 
 class OTPRequestSchema(BaseModel):
     """Request schema for sending OTP to mobile number."""
@@ -107,7 +107,7 @@ class OTPVerifyResponse(BaseModel):
 
     success: bool = Field(..., description="Whether verification was successful")
     message: str = Field(..., description="Status message")
-    doctor_id: Optional[int] = Field(
+    doctor_id: int | None = Field(
         default=None,
         description="Doctor ID (existing or newly created)",
     )
@@ -116,20 +116,20 @@ class OTPVerifyResponse(BaseModel):
         description="Whether this is a new user (first time login)",
     )
     mobile_number: str = Field(..., description="Verified mobile number")
-    role: Optional[str] = Field(
+    role: str | None = Field(
         default="user",
         description="User role: admin, operational, or user",
     )
 
-    access_token: Optional[str] = Field(
+    access_token: str | None = Field(
         default=None,
         description="JWT access token with claims (doctor_id, phone, email, role)",
     )
-    token_type: Optional[str] = Field(
+    token_type: str | None = Field(
         default="bearer",
         description="Token type, typically 'bearer'",
     )
-    expires_in: Optional[int] = Field(
+    expires_in: int | None = Field(
         default=None,
         description="Token expiration time in seconds",
     )
@@ -153,7 +153,7 @@ class OTPErrorResponse(BaseModel):
 
     success: bool = Field(default=False)
     message: str = Field(..., description="Error message")
-    error_code: Optional[str] = Field(
+    error_code: str | None = Field(
         default=None,
         description="Error code for client handling",
     )

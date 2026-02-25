@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 if TYPE_CHECKING:
     from httpx import AsyncClient
@@ -18,7 +19,7 @@ async def test_request_otp(client: AsyncClient) -> None:
     with patch("src.app.services.otp_service.OTPService.send_otp") as mock_send:
         mock_send.return_value = (True, "OTP Sent")
         response = await client.post("/api/v1/auth/otp/request", json=payload)
-    
+
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
@@ -29,9 +30,9 @@ async def test_verify_otp(client: AsyncClient) -> None:
     payload = {"mobile_number": "9876543210", "otp": "999999"}
     with patch("src.app.services.otp_service.OTPService.verify_otp") as mock_verify:
         mock_verify.return_value = (True, "OTP Verified")
-        
+
         response = await client.post("/api/v1/auth/otp/verify", json=payload)
-        
+
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
@@ -44,7 +45,7 @@ async def test_resend_otp(client: AsyncClient) -> None:
     with patch("src.app.services.otp_service.OTPService.send_otp") as mock_send:
         mock_send.return_value = (True, "OTP Resent")
         response = await client.post("/api/v1/auth/otp/resend", json=payload)
-        
+
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True

@@ -1,19 +1,19 @@
 """Models package - SQLAlchemy ORM models."""
 from .doctor import Doctor
-from .user import User
-from .onboarding import (
-    DoctorIdentity,
-    DoctorDetails,
-    DoctorMedia,
-    DoctorStatusHistory,
-)
-from .onboarding import DropdownOption
 from .hospital import (
-    Hospital,
     DoctorHospitalAffiliation,
+    Hospital,
     HospitalVerificationStatus,
 )
+from .onboarding import (
+    DoctorDetails,
+    DoctorIdentity,
+    DoctorMedia,
+    DoctorStatusHistory,
+    DropdownOption,
+)
 from .testimonial import Testimonial
+from .user import User
 from .voice_config import VoiceOnboardingBlock, VoiceOnboardingField
 
 __all__ = [

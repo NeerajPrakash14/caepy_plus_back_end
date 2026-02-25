@@ -6,14 +6,13 @@ Pydantic models for testimonial/doctor comments displayed on homepage carousel.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class TestimonialBase(BaseModel):
     """Base schema for testimonials."""
-    
+
     doctor_name: str = Field(..., min_length=1, max_length=200, description="Doctor's full name")
     specialty: str | None = Field(default=None, max_length=100, description="Doctor's specialty")
     designation: str | None = Field(default=None, max_length=200, description="Doctor's designation/title")
@@ -33,7 +32,7 @@ class TestimonialCreate(TestimonialBase):
 
 class TestimonialUpdate(BaseModel):
     """Payload for updating an existing testimonial."""
-    
+
     doctor_name: str | None = Field(default=None, min_length=1, max_length=200)
     specialty: str | None = None
     designation: str | None = None
@@ -48,9 +47,9 @@ class TestimonialUpdate(BaseModel):
 
 class TestimonialResponse(TestimonialBase):
     """API response model for testimonial."""
-    
+
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: str
     created_at: datetime
     updated_at: datetime
@@ -58,6 +57,6 @@ class TestimonialResponse(TestimonialBase):
 
 class TestimonialListResponse(BaseModel):
     """Response for list of testimonials."""
-    
+
     testimonials: list[TestimonialResponse]
     total: int

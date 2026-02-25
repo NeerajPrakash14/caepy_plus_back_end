@@ -10,7 +10,6 @@ Features:
 """
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import time
@@ -18,11 +17,11 @@ from typing import Any
 
 from google import genai
 from tenacity import (
+    before_sleep_log,
     retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
-    before_sleep_log,
 )
 
 from ..core.config import get_settings
@@ -46,12 +45,12 @@ class GeminiService:
             prompt="Extract data from this text...",
         )
     """
-    
+
     def __init__(self) -> None:
         """Initialize the Gemini client with API configuration."""
         self.settings = get_settings()
         self._client: genai.Client | None = None
-    
+
     @property
     def client(self) -> genai.Client:
         """Get or create the Gemini client instance."""
@@ -64,7 +63,7 @@ class GeminiService:
             self._client = genai.Client(api_key=self.settings.GOOGLE_API_KEY)
             logger.info(f"Initialized Gemini client with model: {self.settings.GEMINI_MODEL}")
         return self._client
-    
+
     def _get_generation_config(
         self,
         temperature: float | None = None,
@@ -75,7 +74,7 @@ class GeminiService:
             "temperature": temperature or self.settings.GEMINI_TEMPERATURE,
             "max_output_tokens": max_tokens or self.settings.GEMINI_MAX_TOKENS,
         }
-    
+
     def _create_retry_decorator(self):
         """Create a tenacity retry decorator with logging."""
         return retry(
@@ -92,7 +91,7 @@ class GeminiService:
             before_sleep=before_sleep_log(logger, logging.WARNING),
             reraise=True,
         )
-    
+
     async def generate(
         self,
         prompt: str,
@@ -115,24 +114,24 @@ class GeminiService:
         """
 
         start_time = time.time()
-        
+
         try:
             config = self._get_generation_config(temperature, max_tokens)
-            
+
             logger.debug(f"Gemini request: {prompt[:200]}...")
-            
+
             # Use new google.genai API
             response = await self.client.aio.models.generate_content(
                 model=self.settings.GEMINI_MODEL,
                 contents=prompt,
                 config=config,
             )
-            
+
             elapsed_ms = (time.time() - start_time) * 1000
             logger.info(f"Gemini response in {elapsed_ms:.2f}ms")
-            
+
             return response.text
-            
+
         except Exception as e:
             error_str = str(e).lower()
             if "blocked" in error_str or "safety" in error_str:
@@ -146,7 +145,7 @@ class GeminiService:
                 message="AI service temporarily unavailable",
                 original_error=str(e),
             )
-    
+
     async def generate_with_retry(
         self,
         prompt: str,
@@ -159,13 +158,13 @@ class GeminiService:
         Uses exponential backoff for transient failures.
         """
         retry_decorator = self._create_retry_decorator()
-        
+
         @retry_decorator
         async def _generate():
             return await self.generate(prompt, temperature, max_tokens)
-        
+
         return await _generate()
-    
+
     async def generate_structured(
         self,
         prompt: str,
@@ -193,9 +192,9 @@ class GeminiService:
         raw_response = await self.generate_with_retry(
             prompt, temperature, max_tokens
         )
-        
+
         return self._parse_json_response(raw_response)
-    
+
     def _parse_json_response(self, response: str) -> dict[str, Any]:
         """
         Parse JSON from Gemini response, handling common formatting issues.
@@ -204,17 +203,17 @@ class GeminiService:
         """
         # Clean up response if wrapped in markdown
         cleaned = response.strip()
-        
+
         if cleaned.startswith("```json"):
             cleaned = cleaned[7:]  # Remove ```json
         elif cleaned.startswith("```"):
             cleaned = cleaned[3:]  # Remove ```
-        
+
         if cleaned.endswith("```"):
             cleaned = cleaned[:-3]  # Remove trailing ```
-        
+
         cleaned = cleaned.strip()
-        
+
         try:
             return json.loads(cleaned)
         except json.JSONDecodeError as e:
@@ -225,7 +224,7 @@ class GeminiService:
                 source="gemini",
                 details={"parse_error": str(e), "raw_response": response[:500]},
             )
-    
+
     async def generate_with_vision(
         self,
         prompt: str,
@@ -252,33 +251,33 @@ class GeminiService:
             ExtractionError: If parsing fails
         """
         start_time = time.time()
-        
+
 
         try:
             config = self._get_generation_config(temperature, max_tokens)
-            
+
             # Create the Part for the new google.genai API
             from google.genai import types
-            
+
             image_part = types.Part.from_bytes(
                 data=file_content,
                 mime_type=mime_type
             )
-            
+
             logger.info(f"Gemini Vision request for {mime_type}")
-            
+
             # Use new google.genai API with multimodal content
             response = await self.client.aio.models.generate_content(
                 model=self.settings.GEMINI_MODEL,
                 contents=[prompt, image_part],
                 config=config,
             )
-            
+
             elapsed_ms = (time.time() - start_time) * 1000
             logger.info(f"Gemini Vision response in {elapsed_ms:.2f}ms")
-            
+
             return self._parse_json_response(response.text)
-            
+
         except ExtractionError:
             raise
         except Exception as e:

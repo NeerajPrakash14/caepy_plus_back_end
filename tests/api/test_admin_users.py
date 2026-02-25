@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
 import pytest
 
 if TYPE_CHECKING:
@@ -52,7 +53,7 @@ async def test_get_user(client: AsyncClient, auth_headers: dict[str, str]) -> No
     create_resp = await client.post("/api/v1/admin/users", json=payload, headers=auth_headers)
     assert create_resp.status_code == 201
     user_id = create_resp.json()["user"]["id"]
-    
+
     response = await client.get(f"/api/v1/admin/users/{user_id}", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
@@ -73,7 +74,7 @@ async def test_update_user(client: AsyncClient, auth_headers: dict[str, str]) ->
     """Test updating user."""
     create_resp = await client.post("/api/v1/admin/users", json={"phone": "+1122334455", "role": "user"}, headers=auth_headers)
     user_id = create_resp.json()["user"]["id"]
-    
+
     response = await client.patch(f"/api/v1/admin/users/{user_id}", json={"doctor_id": 99}, headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["user"]["doctor_id"] == 99
@@ -83,7 +84,7 @@ async def test_update_user_role(client: AsyncClient, auth_headers: dict[str, str
     """Test updating user role."""
     create_resp = await client.post("/api/v1/admin/users", json={"phone": "+5544332211", "role": "user"}, headers=auth_headers)
     user_id = create_resp.json()["user"]["id"]
-    
+
     response = await client.patch(f"/api/v1/admin/users/{user_id}/role", json={"role": "operational"}, headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["user"]["role"] == "operational"
@@ -93,7 +94,7 @@ async def test_update_user_status(client: AsyncClient, auth_headers: dict[str, s
     """Test updating user status."""
     create_resp = await client.post("/api/v1/admin/users", json={"phone": "+9988776655", "role": "user"}, headers=auth_headers)
     user_id = create_resp.json()["user"]["id"]
-    
+
     response = await client.patch(f"/api/v1/admin/users/{user_id}/status", json={"is_active": False}, headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["user"]["is_active"] is False
@@ -103,7 +104,7 @@ async def test_deactivate_user(client: AsyncClient, auth_headers: dict[str, str]
     """Test soft deleting a user."""
     create_resp = await client.post("/api/v1/admin/users", json={"phone": "+7777777777", "role": "user"}, headers=auth_headers)
     user_id = create_resp.json()["user"]["id"]
-    
+
     response = await client.delete(f"/api/v1/admin/users/{user_id}", headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["success"] is True
