@@ -28,52 +28,27 @@ router = APIRouter(prefix="/testimonials")
 @router.get(
     "",
     response_model=GenericResponse[TestimonialListResponse],
-    summary="Get active testimonials for homepage",
-    description="Returns list of active doctor testimonials for the homepage carousel. Ordered by display_order.",
+    summary="Get testimonials",
+    description="Returns list of testimonials. Ordered by display_order. Active only by default.",
 )
 async def list_testimonials(
     db: DbSession,
     skip: int = Query(default=0, ge=0, description="Number of records to skip"),
     limit: int = Query(default=20, ge=1, le=100, description="Maximum number of records to return"),
+    include_inactive: bool = Query(default=False, description="Include inactive testimonials (Admin only conceptually)"),
 ) -> GenericResponse[TestimonialListResponse]:
-    """Get active testimonials for public display."""
+    """Get testimonials."""
     repo = TestimonialRepository(db)
 
-    testimonials = await repo.list_active(skip=skip, limit=limit)
-    total = await repo.count_active()
+    if include_inactive:
+        testimonials = await repo.list_all(skip=skip, limit=limit)
+        total = await repo.count_all()
+    else:
+        testimonials = await repo.list_active(skip=skip, limit=limit)
+        total = await repo.count_active()
 
     return GenericResponse(
         message="Testimonials retrieved successfully",
-        data=TestimonialListResponse(
-            testimonials=[TestimonialResponse.model_validate(t) for t in testimonials],
-            total=total,
-        ),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Admin endpoints (for managing testimonials)
-# ---------------------------------------------------------------------------
-
-@router.get(
-    "/admin",
-    response_model=GenericResponse[TestimonialListResponse],
-    summary="Get all testimonials (admin)",
-    description="Returns all testimonials including inactive ones. For admin management.",
-)
-async def list_all_testimonials(
-    db: DbSession,
-    skip: int = Query(default=0, ge=0),
-    limit: int = Query(default=50, ge=1, le=200),
-) -> GenericResponse[TestimonialListResponse]:
-    """Get all testimonials for admin view."""
-    repo = TestimonialRepository(db)
-
-    testimonials = await repo.list_all(skip=skip, limit=limit)
-    total = await repo.count_all()
-
-    return GenericResponse(
-        message="All testimonials retrieved",
         data=TestimonialListResponse(
             testimonials=[TestimonialResponse.model_validate(t) for t in testimonials],
             total=total,

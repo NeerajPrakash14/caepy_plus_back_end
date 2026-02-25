@@ -48,20 +48,24 @@ async def create_identity(payload: DoctorIdentityCreate, db: DbSession) -> Docto
     identity = await repo.create_identity(**payload.model_dump())
     return identity
 
-@router.get("/identities/by-email", response_model=DoctorIdentityResponse)
-async def get_identity_by_email(email: str, db: DbSession) -> DoctorIdentityResponse:
+@router.get("/identities", response_model=DoctorIdentityResponse)
+async def get_identity(
+    doctor_id: int | None = Query(None, description="Lookup by doctor ID"),
+    email: str | None = Query(None, description="Lookup by email"),
+    db: DbSession = None
+) -> DoctorIdentityResponse:
     repo = OnboardingRepository(db)
-    identity = await repo.get_identity_by_email(email)
+    
+    if doctor_id:
+        identity = await repo.get_identity_by_doctor_id(doctor_id)
+    elif email:
+        identity = await repo.get_identity_by_email(email)
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Must provide either doctor_id or email")
+        
     if not identity:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor identity not found")
-    return identity
-
-@router.get("/identities/{doctor_id}", response_model=DoctorIdentityResponse)
-async def get_identity(doctor_id: int, db: DbSession) -> DoctorIdentityResponse:
-    repo = OnboardingRepository(db)
-    identity = await repo.get_identity_by_doctor_id(doctor_id)
-    if not identity:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor identity not found")
+        
     return identity
 
 # ---------------------------------------------------------------------------
@@ -410,105 +414,63 @@ async def list_doctors_with_filter(
         pagination=PaginationMeta.from_total(total=total, page=page, page_size=page_size),
     )
 
-class DoctorLookupByEmailPayload(BaseModel):
-    email: EmailStr
-
-class DoctorLookupByPhonePayload(BaseModel):
-    phone_number: str
-
-@router.get("/doctors/{doctor_id}/full", response_model=DoctorWithFullInfoResponse)
-async def get_doctor_with_full_info_by_id(
-    doctor_id: int,
-    db: DbSession,
+@router.get("/doctors/lookup", response_model=DoctorWithFullInfoResponse)
+async def get_doctor_with_full_info(
+    doctor_id: int | None = Query(None, description="Lookup by doctor ID"),
+    email: str | None = Query(None, description="Lookup by email address"),
+    phone: str | None = Query(None, description="Lookup by phone number"),
+    db: DbSession = None,
 ) -> DoctorWithFullInfoResponse:
-    """Fetch a single doctor's complete onboarding data by doctor_id."""
+    """Fetch a single doctor's complete onboarding data by ID, email, or phone."""
 
     from ....repositories.doctor_repository import DoctorRepository
 
     repo = OnboardingRepository(db)
     doctor_repo = DoctorRepository(db)
 
-    # Try onboarding identity first, fall back to doctors table
-    identity = await repo.get_identity_by_doctor_id(doctor_id)
-    if identity is not None:
-        identity_resp = DoctorIdentityResponse.model_validate(identity)
+    identity = None
+    doctor = None
+    resolved_doctor_id = doctor_id
+
+    if doctor_id:
+        identity = await repo.get_identity_by_doctor_id(doctor_id)
+        if not identity:
+            doctor = await doctor_repo.get_by_id(doctor_id)
+            
+    elif email:
+        identity = await repo.get_identity_by_email(email)
+        if identity:
+            resolved_doctor_id = identity.doctor_id
+        else:
+            doctor = await doctor_repo.get_by_email(email)
+            if doctor:
+                resolved_doctor_id = doctor.id
+                
+    elif phone:
+        identity = await repo.get_identity_by_phone(phone)
+        if identity:
+            resolved_doctor_id = identity.doctor_id
+        else:
+            # Need to format phone number to E.164 if they just pass 10 digits
+            formatted_phone = phone if phone.startswith('+') else f"+91{phone}"
+            doctor = await doctor_repo.get_by_phone_number(formatted_phone)
+            # Try original just in case it's in another format
+            if not doctor and not phone.startswith('+'):
+                 doctor = await doctor_repo.get_by_phone_number(phone)
+                 
+            if doctor:
+                resolved_doctor_id = doctor.id
     else:
-        doctor = await doctor_repo.get_by_id(doctor_id)
-        if doctor is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor not found")
-        identity_resp = _build_identity_from_doctor(doctor)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Must provide doctor_id, email, or phone")
 
-    details = await repo.get_details_by_doctor_id(doctor_id)
-    media = await repo.list_media(doctor_id)
-    status_history = await repo.get_status_history(doctor_id)
+    if identity is None and doctor is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor not found")
+        
+    identity_resp = DoctorIdentityResponse.model_validate(identity) if identity else _build_identity_from_doctor(doctor)
 
-    return DoctorWithFullInfoResponse(
-        identity=identity_resp,
-        details=DoctorDetailsResponse.model_validate(details) if details else None,
-        media=[DoctorMediaResponse.model_validate(m) for m in media],
-        status_history=[DoctorStatusHistoryResponse.model_validate(h) for h in status_history],
-    )
-
-@router.post("/doctors/by-email/full", response_model=DoctorWithFullInfoResponse)
-async def get_doctor_with_full_info_by_email(
-    payload: DoctorLookupByEmailPayload,
-    db: DbSession,
-) -> DoctorWithFullInfoResponse:
-    """Fetch a single doctor's complete onboarding data by email."""
-
-    from ....repositories.doctor_repository import DoctorRepository
-
-    repo = OnboardingRepository(db)
-    doctor_repo = DoctorRepository(db)
-
-    identity = await repo.get_identity_by_email(payload.email)
-    if identity is not None:
-        identity_resp = DoctorIdentityResponse.model_validate(identity)
-        doctor_id = identity.doctor_id
-    else:
-        doctor = await doctor_repo.get_by_email(payload.email)
-        if doctor is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor not found")
-        identity_resp = _build_identity_from_doctor(doctor)
-        doctor_id = doctor.id
-
-    details = await repo.get_details_by_doctor_id(doctor_id)
-    media = await repo.list_media(doctor_id)
-    status_history = await repo.get_status_history(doctor_id)
-
-    return DoctorWithFullInfoResponse(
-        identity=identity_resp,
-        details=DoctorDetailsResponse.model_validate(details) if details else None,
-        media=[DoctorMediaResponse.model_validate(m) for m in media],
-        status_history=[DoctorStatusHistoryResponse.model_validate(h) for h in status_history],
-    )
-
-@router.post("/doctors/by-phone/full", response_model=DoctorWithFullInfoResponse)
-async def get_doctor_with_full_info_by_phone(
-    payload: DoctorLookupByPhonePayload,
-    db: DbSession,
-) -> DoctorWithFullInfoResponse:
-    """Fetch a single doctor's complete onboarding data by phone number."""
-
-    from ....repositories.doctor_repository import DoctorRepository
-
-    repo = OnboardingRepository(db)
-    doctor_repo = DoctorRepository(db)
-
-    identity = await repo.get_identity_by_phone(payload.phone_number)
-    if identity is not None:
-        identity_resp = DoctorIdentityResponse.model_validate(identity)
-        doctor_id = identity.doctor_id
-    else:
-        doctor = await doctor_repo.get_by_phone_number(payload.phone_number)
-        if doctor is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor not found")
-        identity_resp = _build_identity_from_doctor(doctor)
-        doctor_id = doctor.id
-
-    details = await repo.get_details_by_doctor_id(doctor_id)
-    media = await repo.list_media(doctor_id)
-    status_history = await repo.get_status_history(doctor_id)
+    details = await repo.get_details_by_doctor_id(resolved_doctor_id)
+    media = await repo.list_media(resolved_doctor_id)
+    status_history = await repo.get_status_history(resolved_doctor_id)
 
     return DoctorWithFullInfoResponse(
         identity=identity_resp,

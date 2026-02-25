@@ -41,7 +41,7 @@ async def test_create_identity(client: AsyncClient, auth_headers: dict[str, str]
 async def test_get_identity(client: AsyncClient, auth_headers: dict[str, str], sample_identity: dict) -> None:
     """Test get identity by doctor_id."""
     doctor_id = sample_identity["doctor_id"]
-    response = await client.get(f"/api/v1/onboarding-admin/identities/{doctor_id}", headers=auth_headers)
+    response = await client.get(f"/api/v1/onboarding-admin/identities?doctor_id={doctor_id}", headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["email"] == "admin.test@example.com"
 
@@ -49,7 +49,7 @@ async def test_get_identity(client: AsyncClient, auth_headers: dict[str, str], s
 async def test_get_identity_by_email(client: AsyncClient, auth_headers: dict[str, str], sample_identity: dict) -> None:
     """Test get identity by email."""
     email = sample_identity["email"]
-    response = await client.get(f"/api/v1/onboarding-admin/identities/by-email?email={email}", headers=auth_headers)
+    response = await client.get(f"/api/v1/onboarding-admin/identities?email={email}", headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["doctor_id"] == sample_identity["doctor_id"]
 
@@ -163,7 +163,7 @@ async def test_list_doctors_with_filter(client: AsyncClient, auth_headers: dict[
 async def test_get_doctor_full_by_id(client: AsyncClient, auth_headers: dict[str, str], sample_identity: dict) -> None:
     """Test full aggregate fetch."""
     doctor_id = sample_identity["doctor_id"]
-    response = await client.get(f"/api/v1/onboarding-admin/doctors/{doctor_id}/full", headers=auth_headers)
+    response = await client.get(f"/api/v1/onboarding-admin/doctors/lookup?doctor_id={doctor_id}", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert "identity" in data
@@ -173,8 +173,7 @@ async def test_get_doctor_full_by_id(client: AsyncClient, auth_headers: dict[str
 async def test_get_doctor_full_by_email(client: AsyncClient, auth_headers: dict[str, str], sample_identity: dict) -> None:
     """Test full aggregate fetch by email."""
     email = sample_identity["email"]
-    payload = {"email": email}
-    response = await client.post("/api/v1/onboarding-admin/doctors/by-email/full", json=payload, headers=auth_headers)
+    response = await client.get(f"/api/v1/onboarding-admin/doctors/lookup?email={email}", headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["identity"]["doctor_id"] == sample_identity["doctor_id"]
 
@@ -182,7 +181,6 @@ async def test_get_doctor_full_by_email(client: AsyncClient, auth_headers: dict[
 async def test_get_doctor_full_by_phone(client: AsyncClient, auth_headers: dict[str, str], sample_identity: dict) -> None:
     """Test full aggregate fetch by phone."""
     phone = sample_identity["phone_number"]
-    payload = {"phone_number": phone}
-    response = await client.post("/api/v1/onboarding-admin/doctors/by-phone/full", json=payload, headers=auth_headers)
+    response = await client.get(f"/api/v1/onboarding-admin/doctors/lookup?phone={phone}", headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["identity"]["doctor_id"] == sample_identity["doctor_id"]

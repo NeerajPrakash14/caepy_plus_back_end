@@ -65,49 +65,6 @@ async def get_affiliation_repo(
     return DoctorHospitalAffiliationRepository(db)
 
 
-# =============================================================================
-# Search Endpoints (Public - for onboarding dropdown)
-# =============================================================================
-
-@router.get(
-    "/search",
-    response_model=GenericResponse[list[HospitalSearchResult]],
-    summary="Search hospitals for autocomplete",
-    description="Search verified hospitals by name. Used for dropdown during doctor onboarding.",
-)
-async def search_hospitals(
-    q: Annotated[str, Query(min_length=1, description="Search query (hospital name)")],
-    city: Annotated[str | None, Query(description="Filter by city")] = None,
-    state: Annotated[str | None, Query(description="Filter by state")] = None,
-    limit: Annotated[int, Query(ge=1, le=50, description="Max results")] = 20,
-    repo: HospitalRepository = Depends(get_hospital_repo),
-) -> GenericResponse[list[HospitalSearchResult]]:
-    """Search hospitals for autocomplete dropdown."""
-    hospitals = await repo.search(
-        query=q,
-        city=city,
-        state=state,
-        verified_only=True,
-        active_only=True,
-        limit=limit,
-    )
-
-    results = [
-        HospitalSearchResult(
-            id=h.id,
-            name=h.name,
-            city=h.city,
-            state=h.state,
-            display_name=f"{h.name}, {h.city}" if h.city else h.name,
-        )
-        for h in hospitals
-    ]
-
-    return GenericResponse(
-        message=f"Found {len(results)} hospitals",
-        data=results,
-    )
-
 
 @router.get(
     "/{hospital_id}",
@@ -174,22 +131,54 @@ async def create_hospital(
 
 @router.get(
     "",
-    response_model=GenericResponse[list[HospitalListResponse]],
-    summary="List all hospitals",
+    response_model=GenericResponse[list[HospitalListResponse | HospitalSearchResult | HospitalResponse]],
+    summary="List or search hospitals",
 )
 async def list_hospitals(
+    q: Annotated[str | None, Query(description="Search query (hospital name)")] = None,
     skip: Annotated[int, Query(ge=0, description="Skip N records")] = 0,
     limit: Annotated[int, Query(ge=1, le=100, description="Max records")] = 50,
-    verification_status: Annotated[HospitalVerificationStatus | None, Query(description="Filter by status")] = None,
+    verification_status: Annotated[HospitalVerificationStatus | None, Query(description="Filter by status (e.g. pending)")] = None,
     city: Annotated[str | None, Query(description="Filter by city")] = None,
     state: Annotated[str | None, Query(description="Filter by state")] = None,
     include_inactive: Annotated[bool, Query(description="Include inactive hospitals")] = False,
+    autocomplete: Annotated[bool, Query(description="Return lightweight autocomplete format")] = False,
     repo: HospitalRepository = Depends(get_hospital_repo),
-) -> GenericResponse[list[HospitalListResponse]]:
-    """List hospitals with filters (admin view)."""
+) -> GenericResponse[list[Any]]:
+    """List or search hospitals with optional filters (replaces /search and /admin/pending)."""
+    
+    # Handle search/autocomplete specifically
+    if q and autocomplete:
+        hospitals = await repo.search(
+            query=q,
+            city=city,
+            state=state,
+            verified_only=True,
+            active_only=True,
+            limit=limit,
+        )
+        results = [
+            HospitalSearchResult(
+                id=h.id,
+                name=h.name,
+                city=h.city,
+                state=h.state,
+                display_name=f"{h.name}, {h.city}" if h.city else h.name,
+            )
+            for h in hospitals
+        ]
+        return GenericResponse(message=f"Found {len(results)} hospitals", data=results)
+
+    # Standard list/filter operations
     model_status = None
     if verification_status:
         model_status = ModelHospitalVerificationStatus(verification_status.value)
+        
+        # If explicitly requesting pending, return full HospitalResponse models like /admin/pending did
+        if model_status == ModelHospitalVerificationStatus.PENDING:
+            hospitals, total = await repo.list_pending(skip=skip, limit=limit)
+            results = [HospitalResponse.model_validate(h) for h in hospitals]
+            return GenericResponse(message=f"Found {total} hospitals pending verification", data=results)
 
     hospitals, total = await repo.list_all(
         skip=skip,
@@ -204,27 +193,6 @@ async def list_hospitals(
 
     return GenericResponse(
         message=f"Retrieved {len(results)} of {total} hospitals",
-        data=results,
-    )
-
-
-@router.get(
-    "/admin/pending",
-    response_model=GenericResponse[list[HospitalResponse]],
-    summary="List pending hospitals (admin)",
-)
-async def list_pending_hospitals(
-    admin: AdminOrOperationalUser,  # Require admin or operational role
-    skip: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    repo: HospitalRepository = Depends(get_hospital_repo),
-) -> GenericResponse[list[HospitalResponse]]:
-    """List hospitals pending verification (admin view). Requires admin or operational role."""
-    hospitals, total = await repo.list_pending(skip=skip, limit=limit)
-    results = [HospitalResponse.model_validate(h) for h in hospitals]
-
-    return GenericResponse(
-        message=f"Found {total} hospitals pending verification",
         data=results,
     )
 
