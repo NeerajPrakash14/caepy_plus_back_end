@@ -1,39 +1,57 @@
 """
-Doctor Onboarding Service - Main Application.
+Doctor Onboarding Service — Application Entry Point.
+
+This module wires together:
+- FastAPI application factory with production-grade middleware
+- Structured logging (structlog)
+- CORS, security-headers middleware
+- Global exception handlers
+- Lifespan: DB health check on startup, graceful shutdown
 """
+from __future__ import annotations
+
 import logging
 import sys
-from collections.abc import AsyncGenerator
+import uuid
+from collections.abc import AsyncGenerator, Callable, Awaitable
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import ORJSONResponse
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .api.v1 import router as v1_router
 from .core.config import get_settings
 from .core.exceptions import AppException
+from .core.prompts import get_prompt_manager
 from .core.responses import ErrorDetail, ErrorResponse, ResponseMeta
 from .db.session import close_db, get_db_manager
+from .services import otp_service as _otp_service_module
+from .services.voice_service import get_voice_service
 
 
-# Configure structured logging
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
 def configure_logging() -> None:
-    """Configure structured logging with structlog."""
+    """Configure structured logging via structlog."""
     settings = get_settings()
-
-    # Set log level
     log_level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
 
-    # Configure structlog
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
             structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso"),
-            structlog.dev.ConsoleRenderer() if settings.is_development else structlog.processors.JSONRenderer(),
+            (
+                structlog.dev.ConsoleRenderer()
+                if settings.is_development
+                else structlog.processors.JSONRenderer()
+            ),
         ],
         wrapper_class=structlog.make_filtering_bound_logger(log_level),
         context_class=dict,
@@ -41,49 +59,141 @@ def configure_logging() -> None:
         cache_logger_on_first_use=True,
     )
 
-    # Also configure standard logging for third-party libraries
+    # Route standard-library logging through the same level so third-party
+    # libraries (SQLAlchemy, uvicorn, httpx …) respect the configured level.
     logging.basicConfig(
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         level=log_level,
         stream=sys.stdout,
     )
 
-# Application lifespan manager
+
+# ---------------------------------------------------------------------------
+# Security-headers middleware
+# ---------------------------------------------------------------------------
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Inject security-hardening HTTP response headers on every response.
+
+    These headers are a defence-in-depth layer and do not replace proper
+    authentication / authorisation controls.
+    """
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        # Strict-Transport-Security is only meaningful over HTTPS.
+        # The reverse proxy / load-balancer in production should enforce HTTPS;
+        # we set it here as a belt-and-suspenders measure.
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=63072000; includeSubDomains; preload"
+        )
+        # Content-Security-Policy — relax for Swagger / ReDoc docs paths in
+        # development so the browser can load their inline scripts and styles.
+        # All other paths (and all of production) use the strict locked-down policy.
+        _settings = get_settings()
+        docs_paths = {"/docs", "/redoc", "/openapi.json"}
+        if request.url.path in docs_paths and _settings.APP_ENV != "production":
+            # Swagger UI loads JS/CSS from jsdelivr CDN and favicon from fastapi.tiangolo.com
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                "img-src 'self' data: https://fastapi.tiangolo.com; "
+                "frame-ancestors 'none'; "
+                "base-uri 'none'"
+            )
+        else:
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+            )
+        return response
+
+
+# ---------------------------------------------------------------------------
+# Request-ID middleware
+# ---------------------------------------------------------------------------
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Attach a unique request ID to every request/response pair.
+
+    The middleware honours an incoming ``X-Request-ID`` header so that
+    external systems (API gateways, load balancers) can inject their own
+    correlation IDs and have them propagated all the way through.
+
+    The ID is:
+    - Stored in ``request.state.request_id`` for access inside endpoints.
+    - Returned in the ``X-Request-ID`` response header for the client.
+    - Bound to the structlog context so every log line for this request
+      automatically includes ``request_id=...``.
+    """
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        request.state.request_id = request_id
+        # Bind to structlog context so all log lines for this request carry it.
+        structlog.contextvars.bind_contextvars(request_id=request_id)
+        try:
+            response = await call_next(request)
+        finally:
+            structlog.contextvars.unbind_contextvars("request_id")
+        response.headers["X-Request-ID"] = request_id
+        return response
+
+
+# ---------------------------------------------------------------------------
+# Application lifespan
+# ---------------------------------------------------------------------------
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """
-    Application lifespan manager.
-    
-    Handles startup and shutdown events:
-    - Startup: Initialize database, configure logging, start background tasks
-    - Shutdown: Close database connections, cleanup sessions
+    """Manage application startup and shutdown.
+
+    Startup:
+        1. Configure logging.
+        2. Verify database connectivity (health check only — schema
+           management is handled exclusively by Alembic migrations, NOT
+           by SQLAlchemy's ``create_all``).
+        3. Start background voice-session cleanup task.
+
+    Shutdown:
+        1. Cancel background tasks gracefully.
+        2. Close all database connections.
     """
     import asyncio
 
-    from .services.voice_service import get_voice_service
-
     settings = get_settings()
     logger = structlog.get_logger()
-
-    # Background task for session cleanup
     cleanup_task: asyncio.Task | None = None
 
-    async def periodic_session_cleanup() -> None:
-        """Cleanup expired voice sessions every 5 minutes."""
+    async def _periodic_session_cleanup() -> None:
+        """Purge expired voice sessions every 5 minutes."""
         while True:
             try:
-                await asyncio.sleep(300)  # 5 minutes
-                voice_service = get_voice_service()
-                cleaned = await voice_service.store.cleanup_expired()
+                await asyncio.sleep(300)
+                cleaned = await get_voice_service().store.cleanup_expired()
                 if cleaned > 0:
-                    logger.info(f"Cleaned up {cleaned} expired voice sessions")
+                    logger.info("Cleaned up expired voice sessions", count=cleaned)
             except asyncio.CancelledError:
                 break
-            except Exception as e:
-                logger.error(f"Session cleanup error: {e}")
+            except Exception as exc:
+                logger.error("Session cleanup error", error=str(exc))
 
+    # ---- Startup ----
+    configure_logging()
 
-    # Startup
     logger.info(
         "Starting application",
         app_name=settings.APP_NAME,
@@ -91,27 +201,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         environment=settings.APP_ENV,
     )
 
-    configure_logging()
+    # Warm up the prompt manager eagerly at startup so the synchronous YAML
+    # file read (open() in _load_prompts) never blocks the event loop during
+    # live request handling.
+    try:
+        get_prompt_manager()
+        logger.info("Prompt manager initialized")
+    except Exception as exc:
+        logger.warning("Prompt manager initialization failed", error=str(exc))
 
-    # Initialize PostgreSQL database
     db_manager = get_db_manager()
-    await db_manager.create_tables()
 
-    # Check database health
-    health = await db_manager.health_check()
-    logger.info("Database health check", postgres=health)
+    # Verify DB connectivity — schema is managed solely by Alembic.
+    # We intentionally do NOT call create_tables() here; run
+    #   scripts/migrate.py  (or  alembic upgrade head)
+    # before the first deployment and after every schema change.
+    db_health = await db_manager.health_check()
+    logger.info("Database health check", result=db_health)
 
-    # Start background cleanup task
-    cleanup_task = asyncio.create_task(periodic_session_cleanup())
+    cleanup_task = asyncio.create_task(_periodic_session_cleanup())
 
     logger.info("Application started successfully")
 
     yield
 
-    # Shutdown
+    # ---- Shutdown ----
     logger.info("Shutting down application")
 
-    # Cancel background tasks
     if cleanup_task:
         cleanup_task.cancel()
         try:
@@ -119,40 +235,76 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except asyncio.CancelledError:
             pass
 
-    # Close database connections
     await close_db()
+
+    # Close OTP service resources (httpx client + Redis connection) if the
+    # service was ever initialized during this process's lifetime.
+    if _otp_service_module._otp_service is not None:
+        try:
+            await _otp_service_module._otp_service.close()
+            logger.info("OTP service closed")
+        except Exception as exc:
+            logger.warning("OTP service close error", error=str(exc))
 
     logger.info("Application shutdown complete")
 
+
+# ---------------------------------------------------------------------------
+# Application factory
+# ---------------------------------------------------------------------------
+
 def create_application() -> FastAPI:
-    """
-    Application factory function.
-    
-    Creates and configures the FastAPI application with:
-    - CORS middleware
-    - Exception handlers
-    - API routers
-    - OpenAPI documentation
-    """
+    """Create and configure the FastAPI application."""
     settings = get_settings()
 
-    # OpenAPI Tags metadata for better organization
     tags_metadata = [
         {
             "name": "Health",
-            "description": "🏥 **Health Check & Readiness Probes** - Monitor service status and dependencies",
+            "description": "🏥 Health checks — liveness, readiness, and comprehensive status.",
+        },
+        {
+            "name": "Authentication",
+            "description": "🔐 OTP-based and Google OAuth login; returns JWT access tokens.",
         },
         {
             "name": "Doctors",
-            "description": "👨‍⚕️ **Doctor Management** - CRUD operations for doctor records including qualifications, practice locations, and professional details",
+            "description": (
+                "👨‍⚕️ Doctor profile management — CRUD, paginated listing, "
+                "admin lookup, and CSV bulk upload."
+            ),
         },
         {
             "name": "Onboarding",
-            "description": "📄 **AI-Powered Resume Extraction** - Upload resumes (PDF/Image) and automatically extract structured professional data using Google Gemini Vision",
+            "description": (
+                "📄 AI-powered resume extraction, profile submission, "
+                "admin verification / rejection."
+            ),
         },
         {
             "name": "Voice Onboarding",
-            "description": "🎤 **Voice-Based Registration** - Natural language conversation interface for collecting doctor information through speech",
+            "description": "🎤 Natural language voice session — start, chat.",
+        },
+        {
+            "name": "Onboarding Admin",
+            "description": "🛠️ Internal admin CRUD for identity, details, media, and status history.",
+        },
+        {
+            "name": "Admin - User Management",
+            "description": "👥 Manage admin and operational user accounts (RBAC).",
+        },
+        {
+            "name": "Dropdowns",
+            "description": (
+                "📋 Public dropdown options (approved values only). "
+                "Authenticated users can propose new values via POST /dropdowns/submit."
+            ),
+        },
+        {
+            "name": "Admin - Dropdowns",
+            "description": (
+                "🗂️ Admin CRUD and approval workflow for dropdown options. "
+                "Approve or reject user-submitted values, manage seed data."
+            ),
         },
     ]
 
@@ -162,95 +314,52 @@ def create_application() -> FastAPI:
         description="""
 # 🏥 Doctor Onboarding Smart-Fill API
 
-**Production-grade REST API** for doctor onboarding with AI-powered data extraction.
+Production-grade REST API for doctor onboarding with AI-powered data extraction.
 
----
-
-## ✨ Key Features
+## Key Features
 
 | Feature | Description |
 |---------|-------------|
-| 📄 **Resume Extraction** | Upload PDF/Image resumes and extract structured data using Gemini AI Vision |
-| 👨‍⚕️ **Doctor Management** | Full CRUD operations for doctor records with validation |
+| 📄 **Resume Extraction** | Upload PDF/Image resumes; extract structured data via Gemini Vision |
+| 👨‍⚕️ **Doctor Management** | Full CRUD with paginated listing and CSV bulk upload |
 | 🎤 **Voice Onboarding** | Natural language conversation for hands-free data collection |
-| 🔄 **Real-time Processing** | Fast AI-powered extraction with confidence scores |
+| 🔐 **Auth** | OTP (mobile) + Google OAuth; JWT with role-based access control |
 
----
+## API Versioning
 
-## 🚀 Quick Start
-
-### 1. Extract data from a resume
-```bash
-curl -X POST http://localhost:8000/api/v1/onboarding/extract-resume \\
-  -F "file=@doctor_resume.pdf"
-```
-
-### 2. Create a doctor record
-```bash
-curl -X POST http://localhost:8000/api/v1/doctors \\
-  -H "Content-Type: application/json" \\
-  -d '{"name": "Dr. Smith", "email": "smith@hospital.com", ...}'
-```
-
-### 3. Start voice onboarding
-```bash
-curl -X POST http://localhost:8000/api/v1/voice/start \\
-  -H "Content-Type: application/json" \\
-  -d '{"language": "en"}'
-```
-
----
-
-## 📋 API Versioning
-
-All endpoints are versioned under `/api/v1/` for backward compatibility.
-
-## 🔐 Authentication
-
-> ⚠️ **Note:** Authentication is disabled in development mode. Enable OAuth2 or API keys in production.
-
-## 📊 Response Format
-
-All responses follow a consistent structure:
-```json
-{
-  "message": "Operation successful",
-  "data": { ... },
-  "meta": { "timestamp": "...", "request_id": "..." }
-}
-```
-
----
-
-Made with ❤️ for healthcare professionals
+All endpoints are versioned under `/api/v1/`.
         """,
+        # Docs are only available in non-production environments.
         docs_url="/docs" if settings.is_development else None,
         redoc_url="/redoc" if settings.is_development else None,
         openapi_url="/openapi.json" if settings.is_development else None,
-        default_response_class=ORJSONResponse,
+        default_response_class=JSONResponse,
         lifespan=lifespan,
         openapi_tags=tags_metadata,
         swagger_ui_parameters={
             "docExpansion": "list",
             "defaultModelsExpandDepth": 2,
-            "defaultModelExpandDepth": 2,
             "filter": True,
-            "showExtensions": True,
-            "showCommonExtensions": True,
-            "syntaxHighlight.theme": "monokai",
             "tryItOutEnabled": True,
         },
-        license_info={
-            "name": "MIT License",
-            "url": "https://opensource.org/licenses/MIT",
-        },
-        contact={
-            "name": "API Support",
-            "email": "support@example.com",
-        },
+        license_info={"name": "MIT License", "url": "https://opensource.org/licenses/MIT"},
+        contact={"name": "API Support", "email": "support@linqmd.com"},
     )
 
-    # Configure CORS
+    # ------------------------------------------------------------------
+    # Middleware — order matters: first registered = outermost wrapper
+    # ------------------------------------------------------------------
+
+    # 1. Security headers (outermost — applies to all responses)
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    # 2. Request-ID — assigns a unique ID per request, returns it in
+    #    X-Request-ID header, and binds it to structlog context so every
+    #    log line emitted during the request carries request_id=<uuid>.
+    app.add_middleware(RequestIDMiddleware)
+
+    # 3. CORS — must be after security headers so preflight OPTIONS
+    #    responses also receive security headers
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,
@@ -259,73 +368,64 @@ Made with ❤️ for healthcare professionals
         allow_headers=["*"],
     )
 
-    # Register exception handlers
-    register_exception_handlers(app)
+    # ------------------------------------------------------------------
+    # Exception handlers
+    # ------------------------------------------------------------------
+    _register_exception_handlers(app)
 
-    # Include API routers
+    # ------------------------------------------------------------------
+    # Routers
+    # ------------------------------------------------------------------
     app.include_router(v1_router)
 
-    # Root endpoint
+    # Root redirect — not in OpenAPI schema
     @app.get("/", include_in_schema=False)
     async def root() -> dict:
-        """Root endpoint - API information."""
-        return {
+        payload: dict = {
             "service": settings.APP_NAME,
             "version": settings.APP_VERSION,
-            "docs": "/docs",
             "health": "/api/v1/health",
         }
+        # Only advertise the docs URL when they are actually enabled.
+        if settings.is_development:
+            payload["docs"] = "/docs"
+        return payload
 
     return app
 
-def register_exception_handlers(app: FastAPI) -> None:
-    """Register global exception handlers."""
+
+def _register_exception_handlers(app: FastAPI) -> None:
+    """Attach global exception handlers to the application."""
     logger = structlog.get_logger()
 
     @app.exception_handler(AppException)
-    async def app_exception_handler(request: Request, exc: AppException) -> ORJSONResponse:
-        """Handle application-specific exceptions."""
+    async def _app_exc(request: Request, exc: AppException) -> JSONResponse:
         logger.warning(
             "Application exception",
             error_code=exc.error_code,
             message=exc.message,
             path=str(request.url),
         )
-
-        return ORJSONResponse(
+        return JSONResponse(
             status_code=exc.status_code,
             content=ErrorResponse(
-                error=ErrorDetail(
-                    code=exc.error_code,
-                    message=exc.message,
-                    details=exc.details,
-                ),
+                error=ErrorDetail(code=exc.error_code, message=exc.message, details=exc.details),
                 meta=ResponseMeta(),
-            ).model_dump(),
+            ).model_dump(mode='json'),
         )
 
     @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(
-        request: Request,
-        exc: RequestValidationError,
-    ) -> ORJSONResponse:
-        """Handle Pydantic validation errors."""
-        logger.warning(
-            "Validation error",
-            errors=exc.errors(),
-            path=str(request.url),
-        )
-
-        # Format validation errors
-        validation_errors = []
-        for error in exc.errors():
-            validation_errors.append({
-                "field": ".".join(str(loc) for loc in error["loc"]),
-                "message": error["msg"],
-                "type": error["type"],
-            })
-
-        return ORJSONResponse(
+    async def _validation_exc(request: Request, exc: RequestValidationError) -> JSONResponse:
+        logger.warning("Validation error", errors=exc.errors(), path=str(request.url))
+        validation_errors = [
+            {
+                "field": ".".join(str(loc) for loc in err["loc"]),
+                "message": err["msg"],
+                "type": err["type"],
+            }
+            for err in exc.errors()
+        ]
+        return JSONResponse(
             status_code=422,
             content=ErrorResponse(
                 error=ErrorDetail(
@@ -334,36 +434,25 @@ def register_exception_handlers(app: FastAPI) -> None:
                     details={"validation_errors": validation_errors},
                 ),
                 meta=ResponseMeta(),
-            ).model_dump(),
+            ).model_dump(mode='json'),
         )
 
     @app.exception_handler(Exception)
-    async def generic_exception_handler(
-        request: Request,
-        exc: Exception,
-    ) -> ORJSONResponse:
-        """Handle unexpected exceptions."""
+    async def _generic_exc(request: Request, exc: Exception) -> JSONResponse:
         settings = get_settings()
-
-        logger.exception(
-            "Unhandled exception",
-            error=str(exc),
-            path=str(request.url),
-        )
-
-        # Don't expose internal errors in production
+        logger.exception("Unhandled exception", error=str(exc), path=str(request.url))
+        # Never expose internal details in production
         message = str(exc) if settings.DEBUG else "An unexpected error occurred"
-
-        return ORJSONResponse(
+        return JSONResponse(
             status_code=500,
             content=ErrorResponse(
-                error=ErrorDetail(
-                    code="INTERNAL_ERROR",
-                    message=message,
-                ),
+                error=ErrorDetail(code="INTERNAL_ERROR", message=message),
                 meta=ResponseMeta(),
-            ).model_dump(),
+            ).model_dump(mode='json'),
         )
 
-# Create application instance
+
+# ---------------------------------------------------------------------------
+# Module-level application instance (consumed by uvicorn / gunicorn)
+# ---------------------------------------------------------------------------
 app = create_application()

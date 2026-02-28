@@ -6,7 +6,7 @@ readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.12"
 authors = [
-    { name = "Your Name", email = "your.email@example.com" }
+    { name = "LinQMD Engineering", email = "engineering@linqmd.com" }
 ]
 keywords = ["fastapi", "healthcare", "onboarding", "ai", "gemini", "microservice"]
 classifiers = [
@@ -32,9 +32,9 @@ dependencies = [
     
     # Database
     "sqlalchemy[asyncio]>=2.0.36,<3.0.0",
-    "aiosqlite>=0.20.0,<1.0.0",       # Async SQLite for development
     "asyncpg>=0.30.0,<1.0.0",          # PostgreSQL async driver for production
     "alembic>=1.14.0,<2.0.0",          # Database migrations
+    "psycopg2-binary>=2.9.9,<3.0.0",   # Sync Postgres driver (required by Alembic offline/sync mode)
     
     # AI Integration (using new google-genai package)
     "google-genai>=1.0.0",             # New Gemini SDK (replaces deprecated google-generativeai)
@@ -42,12 +42,14 @@ dependencies = [
     
     # Utilities
     "python-multipart>=0.0.17,<1.0.0", # File uploads
-    "python-jose[cryptography]>=3.3.0,<4.0.0",  # JWT tokens
-    "passlib[bcrypt]>=1.7.4,<2.0.0",   # Password hashing
     "httpx>=0.28.0,<1.0.0",            # Async HTTP client
     "structlog>=24.4.0,<25.0.0",       # Structured logging
     "orjson>=3.10.0,<4.0.0",           # Fast JSON serialization
-    "pyyaml>=6.0.0,<7.0.0",            # YAML parsing for prompts
+    "pyyaml>=6.0.0,<7.0.0",            # YAML parsing for prompts + email templates
+    "aiosmtplib>=3.0.0,<4.0.0",        # Async SMTP for outbound email notifications
+    # JWT is implemented with stdlib hmac+hashlib (otp.py + security.py) — no
+    # python-jose or passlib needed.  Add passlib[bcrypt] if password hashing
+    # is ever introduced.
 ]
 
 [project.optional-dependencies]
@@ -60,6 +62,7 @@ dev = [
     "mypy>=1.13.0,<2.0.0",
     "pre-commit>=4.0.0,<5.0.0",
     "faker>=33.0.0,<34.0.0",
+    "aiosqlite>=0.20.0,<1.0.0",   # Async SQLite for in-memory unit tests (no Postgres required)
 ]
 
 test = [
@@ -68,16 +71,17 @@ test = [
     "pytest-cov>=6.0.0,<7.0.0",
     "httpx>=0.28.0,<1.0.0",
     "faker>=33.0.0,<34.0.0",
+    "aiosqlite>=0.20.0,<1.0.0",   # Async SQLite for in-memory unit tests
 ]
 
 # Note: Use 'uvicorn src.app.main:app' directly instead of script entry points
 # Script entry points require callable functions, not command strings
 
 [project.urls]
-Homepage = "https://github.com/yourusername/doctor-onboarding-service"
-Documentation = "https://github.com/yourusername/doctor-onboarding-service#readme"
-Repository = "https://github.com/yourusername/doctor-onboarding-service"
-Issues = "https://github.com/yourusername/doctor-onboarding-service/issues"
+Homepage = "https://linqmd.com"
+Documentation = "https://linqmd.com/docs"
+Repository = "https://github.com/linqmd/doctor-onboarding-service"
+Issues = "https://github.com/linqmd/doctor-onboarding-service/issues"
 
 [build-system]
 requires = ["hatchling"]

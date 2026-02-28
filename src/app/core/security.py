@@ -26,6 +26,7 @@ def _base64url_decode(data: str) -> bytes:
     padding = "=" * (-len(data) % 4)
     return base64.urlsafe_b64decode(data + padding)
 
+
 def _decode_jwt(token: str, *, settings: Settings) -> dict[str, Any]:
     """Decode and validate an HS256 JWT.
 
@@ -85,6 +86,7 @@ def _decode_jwt(token: str, *, settings: Settings) -> dict[str, Any]:
         )
 
     return payload
+
 
 async def require_authentication(
     request: Request,

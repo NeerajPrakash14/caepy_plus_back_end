@@ -53,9 +53,9 @@ class QualificationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: int | None = None  # Optional since qualifications are stored as JSON, not separate table rows
-    degree: str = Field(validation_alias="degree_name", serialization_alias="degree")
-    institution: str | None = Field(validation_alias="institution", serialization_alias="institution")
-    year: int | None = Field(validation_alias="completion_year", serialization_alias="year")
+    degree: str | None = Field(default=None)
+    institution: str | None = Field(default=None)
+    year: int | None = Field(default=None)
 
 class PracticeLocationBase(BaseModel):
     """Base schema for practice locations."""
@@ -68,10 +68,6 @@ class PracticeLocationBase(BaseModel):
     consultation_fee: float | None = Field(default=None, ge=0, description="Consultation fee")
     consultation_type: str | None = Field(default=None, description="Type of consultation (In-person, Online, etc.)")
     weekly_schedule: str | None = Field(default=None, description="Weekly schedule or timings")
-
-class PracticeLocationCreate(PracticeLocationBase):
-    """Schema for creating a practice location."""
-    pass
 
 # ============================================
 # Doctor Schemas
@@ -150,18 +146,23 @@ class DoctorBase(BaseModel):
     medical_registration_number: str = Field(
         min_length=1,
         max_length=100,
-        description="Medical registration/license number"
+        description="Medical registration/license number",
+    )
+    medical_council: str | None = Field(
+        default=None,
+        max_length=200,
+        description="Name of the medical council that issued the registration (e.g. Maharashtra Medical Council)",
     )
     registration_year: int | None = Field(
         default=None,
         ge=1900,
         le=2100,
-        description="Year of medical registration"
+        description="Year of medical registration",
     )
     registration_authority: str | None = Field(
         default=None,
         max_length=200,
-        description="Issuing medical council or authority"
+        description="Issuing medical council or authority",
     )
     sub_specialties: list[str] = Field(default_factory=list, description="Sub-specializations")
     areas_of_expertise: list[str] = Field(default_factory=list, description="Areas of expertise")
@@ -271,6 +272,7 @@ class DoctorUpdate(BaseModel):
     years_of_experience: int | None = Field(default=None, ge=0, le=100)
     consultation_fee: float | None = Field(default=None, ge=0)
     medical_registration_number: str | None = Field(default=None, min_length=1, max_length=100)
+    medical_council: str | None = Field(default=None, max_length=200, description="Name of the issuing medical council")
     registration_year: int | None = Field(default=None, ge=1900, le=2100)
     registration_authority: str | None = None
     sub_specialties: list[str] | None = None
@@ -310,6 +312,7 @@ class DoctorResponse(BaseModel):
     consultation_fee: float | None = None
     consultation_currency: str | None = None
     medical_registration_number: str | None = None
+    medical_council: str | None = None
     registration_year: int | None = None
     registration_authority: str | None = None
     sub_specialties: list[str] = Field(default_factory=list)
@@ -419,6 +422,7 @@ class ProfessionalInformation(BaseModel):
 class Registration(BaseModel):
     """Extracted registration information from resume."""
     medical_registration_number: str | None = None
+    medical_council: str | None = None
     registration_year: int | None = None
     registration_authority: str | None = None
 
@@ -473,6 +477,7 @@ class ResumeExtractedData(BaseModel):
             years_of_experience=self.professional_information.years_of_experience,
             consultation_fee=None,
             medical_registration_number=self.registration.medical_registration_number or "",
+            medical_council=self.registration.medical_council,
             registration_year=self.registration.registration_year,
             registration_authority=self.registration.registration_authority,
             sub_specialties=self.professional_information.sub_specialties,

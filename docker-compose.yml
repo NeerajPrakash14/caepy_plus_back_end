@@ -1,95 +1,203 @@
 # ============================================
-# Docker Compose - Development Configuration
+# Docker Compose — Development Configuration
 # ============================================
-# Use this for local development with all services
+# Starts the full stack: API + PostgreSQL + Redis
+# Optional pgAdmin available with --profile tools
+#
+# QUICK START:
+#   1. cp .env.example .env          # copy the template
+#   2. Edit .env and fill in secrets  # see .env.example for required fields
+#   3. docker compose up --build      # build & start everything
+#   4. Visit http://localhost:8000/docs
+#
+# STOP:
+#   docker compose down              # stop (keeps volumes)
+#   docker compose down -v           # stop + delete DB/Redis data
+#
+# PGADMIN (optional DB GUI):
+#   docker compose --profile tools up
+#   Visit http://localhost:5050  (login with PGADMIN_EMAIL / PGADMIN_PASSWORD from .env)
+# ============================================
 
 services:
-  # ----------------------------------------
+
+  # ──────────────────────────────────────────
   # API Service
-  # ----------------------------------------
+  # ──────────────────────────────────────────
   api:
     build:
       context: .
       dockerfile: Dockerfile
       target: production
     container_name: doctor-onboarding-api
+    # entrypoint.sh: waits for DB → runs alembic upgrade head → starts uvicorn
+    entrypoint: ["/app/entrypoint.sh"]
     ports:
       - "8000:8000"
     environment:
+      # ── App ───────────────────────────────
       - APP_ENV=development
-      - DEBUG=true
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/doctor_onboarding
-      - REDIS_URL=redis://redis:6379/0
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      - CORS_ORIGINS=http://localhost:3000
+      - DEBUG=true            # DEV ONLY — config validator blocks DEBUG=true in production
       - LOG_LEVEL=INFO
+
+      # ── Database ──────────────────────────
+      # Points to the `db` service defined below.
+      # Override with a real RDS/Cloud SQL URL in staging/production.
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/doctor_onboarding
+
+      # ── Redis ─────────────────────────────
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_ENABLED=true
+      - REDIS_OTP_PREFIX=otp:
+
+      # ── CORS ──────────────────────────────
+      # Change to your frontend origin in production (never use * in prod).
+      - CORS_ORIGINS=http://localhost:3000
+      - CORS_ALLOW_CREDENTIALS=true
+
+      # ── Security ──────────────────────────
+      # REQUIRED: Change this to a random 64-char string in production.
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production-minimum-32-chars}
+
+      # ── Gemini AI ─────────────────────────
+      # Required for resume parsing and voice onboarding features.
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - GEMINI_TEMPERATURE=${GEMINI_TEMPERATURE:-0.1}
+      - GEMINI_MAX_TOKENS=${GEMINI_MAX_TOKENS:-4096}
+
+      # ── Email / SMTP ──────────────────────
+      - EMAIL_ENABLED=${EMAIL_ENABLED:-false}
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+      - SMTP_USE_SSL=${SMTP_USE_SSL:-false}
+      - EMAIL_FROM_ADDRESS=${EMAIL_FROM_ADDRESS:-noreply@linqmd.com}
+      - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-LinQMD Platform}
+      - EMAIL_TEMPLATES_PATH=config/email_templates.yaml
+
+      # ── SMS / OTP ─────────────────────────
+      - SMS_API_BASE_URL=${SMS_API_BASE_URL:-https://onlysms.co.in/api/otp.aspx}
+      - SMS_USER_ID=${SMS_USER_ID:-}
+      - SMS_USER_PASS=${SMS_USER_PASS:-}
+      - SMS_GSM_ID=${SMS_GSM_ID:-}
+      - SMS_PE_ID=${SMS_PE_ID:-}
+      - SMS_TEMPLATE_ID=${SMS_TEMPLATE_ID:-}
+      - OTP_LENGTH=${OTP_LENGTH:-6}
+      - OTP_EXPIRY_SECONDS=${OTP_EXPIRY_SECONDS:-300}
+      - OTP_MAX_ATTEMPTS=${OTP_MAX_ATTEMPTS:-3}
+
+      # ── Blob / File Storage ────────────────
+      - STORAGE_BACKEND=${STORAGE_BACKEND:-local}
+      - BLOB_STORAGE_PATH=/app/data
+      - BLOB_BASE_URL=/api/v1/blobs
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
+      - ALLOWED_EXTENSIONS=${ALLOWED_EXTENSIONS:-pdf,png,jpg,jpeg,gif}
+
+      # ── LinQMD Sync ───────────────────────
+      - LINQMD_SYNC_ENABLED=${LINQMD_SYNC_ENABLED:-false}
+      - LINQMD_BASE_URL=${LINQMD_BASE_URL:-}
+      - LINQMD_API_KEY=${LINQMD_API_KEY:-}
+
+      # ── uvicorn worker count (see Dockerfile comment) ──
+      - UVICORN_WORKERS=1
+
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+    volumes:
+      # Persist blob uploads between container restarts (dev only).
+      # In production use S3 or another object store (STORAGE_BACKEND=s3).
+      - api_blob_data:/app/data
+
     restart: unless-stopped
+
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/live')"]
+      test: ["CMD", "python", "-c",
+             "import urllib.request, sys; r = urllib.request.urlopen('http://localhost:8000/api/v1/live', timeout=8); sys.exit(0 if r.status == 200 else 1)"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
-    volumes:
-      - ./src:/app/src:ro  # Mount source for development
+      start_period: 20s   # extra time for migrations on first run
+
     networks:
       - doctor-network
 
-  # ----------------------------------------
+  # ──────────────────────────────────────────
   # PostgreSQL Database
-  # ----------------------------------------
+  # ──────────────────────────────────────────
   db:
     image: postgres:16-alpine
     container_name: doctor-onboarding-db
     environment:
+      # These match the DATABASE_URL in the api service above.
+      # Change all three together if you need different credentials.
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=doctor_onboarding
     ports:
+      # Expose locally so you can connect with psql or TablePlus while developing.
+      # Remove this in production if direct DB access should be restricted.
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d doctor_onboarding"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10       # generous retries — first init takes a few seconds
+      start_period: 10s
+    restart: unless-stopped
     networks:
       - doctor-network
 
-  # ----------------------------------------
-  # Redis (OTP Storage & Caching)
-  # ----------------------------------------
+  # ──────────────────────────────────────────
+  # Redis  (OTP storage & caching)
+  # ──────────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: doctor-onboarding-redis
     ports:
+      # Expose locally for debugging (redis-cli, RedisInsight, etc.).
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes   # persist data across restarts
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
     networks:
       - doctor-network
 
-  # ----------------------------------------
-  # Database Admin (Optional)
-  # ----------------------------------------
+  # ──────────────────────────────────────────
+  # pgAdmin  (optional DB GUI — dev only)
+  # ──────────────────────────────────────────
+  # Start with:  docker compose --profile tools up
+  # Access at:   http://localhost:5050
+  #
+  # Add a server in pgAdmin with:
+  #   Host:     db            (the service name — Docker DNS resolves it)
+  #   Port:     5432
+  #   Database: doctor_onboarding
+  #   Username: postgres
+  #   Password: postgres
+  # ──────────────────────────────────────────
   pgadmin:
-    image: dpage/pgadmin4:latest
+    image: dpage/pgadmin4:8
     container_name: doctor-onboarding-pgadmin
     environment:
-      - PGADMIN_DEFAULT_EMAIL=admin@admin.com
-      - PGADMIN_DEFAULT_PASSWORD=admin
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL:-pgadmin@local.dev}
+      # PGADMIN_PASSWORD must be set in your .env file.
+      # See .env.example → PGADMIN_PASSWORD=change-me-strong-password
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-pgadmin-change-me}
     ports:
       - "5050:80"
     depends_on:
@@ -97,12 +205,19 @@ services:
     networks:
       - doctor-network
     profiles:
-      - tools  # Only start with: docker compose --profile tools up
+      - tools    # only starts when: docker compose --profile tools up
 
+# ──────────────────────────────────────────
+# Networks
+# ──────────────────────────────────────────
 networks:
   doctor-network:
     driver: bridge
 
+# ──────────────────────────────────────────
+# Volumes
+# ──────────────────────────────────────────
 volumes:
-  postgres_data:
-  redis_data:
+  postgres_data:   # PostgreSQL data — survives container restarts
+  redis_data:      # Redis AOF log — survives container restarts
+  api_blob_data:   # Uploaded files — survives container restarts

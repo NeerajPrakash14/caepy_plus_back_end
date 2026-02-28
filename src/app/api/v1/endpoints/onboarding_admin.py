@@ -1,23 +1,32 @@
 """Admin CRUD endpoints for onboarding tables.
 
-These endpoints expose basic CRUD operations over:
-- doctor_identity
-- doctor_details
-- doctor_media
-- doctor_status_history
+Exposes administration operations over doctor onboarding data:
+  - doctor_identity    : POST /identities, GET /identities
+  - doctor_details     : PUT /details/{doctor_id}, GET /details/{doctor_id}
+  - doctor_media       : POST/GET /media/{doctor_id}, DELETE /media/{media_id},
+                         POST /media/{doctor_id}/upload
+  - doctor_status_history : POST/GET /status-history/{doctor_id}
 
-They are intended for internal/admin use, not public-facing flows.
+NOTE: The aggregated doctor list and lookup routes formerly at
+  GET /onboarding-admin/doctors
+  GET /onboarding-admin/doctors/lookup
+have been consolidated into the main /doctors endpoint:
+  GET /doctors          (add ?status= for full onboarding info)
+  GET /doctors/lookup
+
+All routes require Admin or Operational role (enforced at each endpoint
+via ``AdminOrOperationalUser`` in addition to the router-level
+``require_authentication`` dependency set in ``v1/__init__.py``).
 """
-
 from __future__ import annotations
 
-import logging
 from collections.abc import Sequence
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile, status
-from pydantic import BaseModel, EmailStr
+import structlog
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from fastapi import status as http_status
 
-from ....core.responses import PaginatedResponse, PaginationMeta
+from ....core.rbac import AdminOrOperationalUser
 from ....db.session import DbSession
 from ....repositories import OnboardingRepository
 from ....schemas import (
@@ -29,165 +38,280 @@ from ....schemas import (
     DoctorMediaResponse,
     DoctorStatusHistoryCreate,
     DoctorStatusHistoryResponse,
-    DoctorWithFullInfoResponse,
-    OnboardingStatusEnum,
 )
 from ....services.blob_storage_service import get_blob_storage_service
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/onboarding-admin", tags=["Onboarding Admin"])
 
-# ---------------------------------------------------------------------------
-# doctor_identity
-# ---------------------------------------------------------------------------
-
-@router.post("/identities", response_model=DoctorIdentityResponse, status_code=status.HTTP_201_CREATED)
-async def create_identity(payload: DoctorIdentityCreate, db: DbSession) -> DoctorIdentityResponse:
-    repo = OnboardingRepository(db)
-    identity = await repo.create_identity(**payload.model_dump())
-    return identity
-
-@router.get("/identities", response_model=DoctorIdentityResponse)
-async def get_identity(
-    doctor_id: int | None = Query(None, description="Lookup by doctor ID"),
-    email: str | None = Query(None, description="Lookup by email"),
-    db: DbSession = None
-) -> DoctorIdentityResponse:
-    repo = OnboardingRepository(db)
-    
-    if doctor_id:
-        identity = await repo.get_identity_by_doctor_id(doctor_id)
-    elif email:
-        identity = await repo.get_identity_by_email(email)
-    else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Must provide either doctor_id or email")
-        
-    if not identity:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor identity not found")
-        
-    return identity
 
 # ---------------------------------------------------------------------------
-# doctor_details
+# Helpers
 # ---------------------------------------------------------------------------
 
-@router.put("/details/{doctor_id}", response_model=DoctorDetailsResponse)
-async def upsert_details(doctor_id: int, payload: DoctorDetailsUpsert, db: DbSession) -> DoctorDetailsResponse:
-    repo = OnboardingRepository(db)
-    details_payload = {k: v for k, v in payload.model_dump().items() if v is not None}
-    details = await repo.upsert_details(doctor_id=doctor_id, payload=details_payload)
-    return details
-
-@router.get("/details/{doctor_id}", response_model=DoctorDetailsResponse)
-async def get_details(doctor_id: int, db: DbSession) -> DoctorDetailsResponse:
-    repo = OnboardingRepository(db)
-    details = await repo.get_details_by_doctor_id(doctor_id)
-    if not details:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor details not found")
-    return details
-
-# ---------------------------------------------------------------------------
-# doctor_media
-# ---------------------------------------------------------------------------
 
 def _build_absolute_uri(request: Request, file_uri: str) -> str:
-    """Build an absolute URL for a stored blob from its file_uri.
+    """Return an absolute URL for ``file_uri``.
 
-    If file_uri is already absolute (http/https), it is returned unchanged.
-    Otherwise it is prefixed with the current request base URL.
+    Already-absolute URIs (http/https) are returned unchanged; relative URIs
+    are prefixed with the current request base URL.
     """
-
     if file_uri.startswith("http://") or file_uri.startswith("https://"):
         return file_uri
-
     base = str(request.base_url).rstrip("/")
     if file_uri.startswith("/"):
         return f"{base}{file_uri}"
     return f"{base}/{file_uri}"
 
-@router.post("/media/{doctor_id}", response_model=DoctorMediaResponse, status_code=status.HTTP_201_CREATED)
+
+# ---------------------------------------------------------------------------
+# doctor_identity
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/identities",
+    response_model=DoctorIdentityResponse,
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Create doctor identity record (Admin/Operational only)",
+)
+async def create_identity(
+    payload: DoctorIdentityCreate,
+    db: DbSession,
+    current_user: AdminOrOperationalUser,
+) -> DoctorIdentityResponse:
+    """Create a new ``doctor_identity`` row.
+
+    Requires Admin or Operational role.
+    """
+    repo = OnboardingRepository(db)
+    log.info(
+        "admin_identity_create",
+        admin_id=current_user.id,
+        email=payload.email,
+    )
+    return await repo.create_identity(**payload.model_dump())
+
+
+@router.get(
+    "/identities",
+    response_model=DoctorIdentityResponse,
+    summary="Fetch doctor identity by doctor_id or email (Admin/Operational only)",
+)
+async def get_identity(
+    db: DbSession,
+    current_user: AdminOrOperationalUser,
+    doctor_id: int | None = Query(None, description="Lookup by doctor ID"),
+    email: str | None = Query(None, description="Lookup by email"),
+) -> DoctorIdentityResponse:
+    """Return the ``doctor_identity`` row for a given ``doctor_id`` or ``email``.
+
+    Requires Admin or Operational role.
+    """
+    repo = OnboardingRepository(db)
+
+    if doctor_id:
+        identity = await repo.get_identity_by_doctor_id(doctor_id)
+    elif email:
+        identity = await repo.get_identity_by_email(email)
+    else:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="Provide either doctor_id or email.",
+        )
+
+    if not identity:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Doctor identity not found.",
+        )
+
+    return identity
+
+
+# ---------------------------------------------------------------------------
+# doctor_details
+# ---------------------------------------------------------------------------
+
+
+@router.put(
+    "/details/{doctor_id}",
+    response_model=DoctorDetailsResponse,
+    summary="Upsert doctor details (Admin/Operational only)",
+)
+async def upsert_details(
+    doctor_id: int,
+    payload: DoctorDetailsUpsert,
+    db: DbSession,
+    current_user: AdminOrOperationalUser,
+) -> DoctorDetailsResponse:
+    """Create or update the ``doctor_details`` row for ``doctor_id``.
+
+    Requires Admin or Operational role.
+    """
+    repo = OnboardingRepository(db)
+    log.info("admin_details_upsert", doctor_id=doctor_id, admin_id=current_user.id)
+    details_payload = {k: v for k, v in payload.model_dump().items() if v is not None}
+    return await repo.upsert_details(doctor_id=doctor_id, payload=details_payload)
+
+
+@router.get(
+    "/details/{doctor_id}",
+    response_model=DoctorDetailsResponse,
+    summary="Fetch doctor details (Admin/Operational only)",
+)
+async def get_details(
+    doctor_id: int,
+    db: DbSession,
+    current_user: AdminOrOperationalUser,
+) -> DoctorDetailsResponse:
+    """Fetch the ``doctor_details`` row for ``doctor_id``.
+
+    Requires Admin or Operational role.
+    """
+    repo = OnboardingRepository(db)
+    details = await repo.get_details_by_doctor_id(doctor_id)
+    if not details:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Doctor details not found.",
+        )
+    return details
+
+
+# ---------------------------------------------------------------------------
+# doctor_media
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/media/{doctor_id}",
+    response_model=DoctorMediaResponse,
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Add media record for a doctor (Admin/Operational only)",
+)
 async def add_media(
     doctor_id: int,
     payload: DoctorMediaCreate,
     db: DbSession,
     request: Request,
+    current_user: AdminOrOperationalUser,
 ) -> DoctorMediaResponse:
-    repo = OnboardingRepository(db)
+    """Insert a ``doctor_media`` row and return the absolute file URI.
 
+    Requires Admin or Operational role.
+    """
+    repo = OnboardingRepository(db)
     media = await repo.add_media(doctor_id=doctor_id, **payload.model_dump())
     media.file_uri = _build_absolute_uri(request, media.file_uri)
+    log.info(
+        "admin_media_added",
+        doctor_id=doctor_id,
+        media_id=media.media_id,
+        admin_id=current_user.id,
+    )
     return media
 
-@router.get("/media/{doctor_id}", response_model=list[DoctorMediaResponse])
+
+@router.get(
+    "/media/{doctor_id}",
+    response_model=list[DoctorMediaResponse],
+    summary="List media for a doctor (Admin/Operational only)",
+)
 async def list_media(
     doctor_id: int,
     db: DbSession,
     request: Request,
+    current_user: AdminOrOperationalUser,
 ) -> Sequence[DoctorMediaResponse]:
+    """Return all ``doctor_media`` rows for ``doctor_id`` with absolute URIs.
+
+    Requires Admin or Operational role.
+    """
     repo = OnboardingRepository(db)
     media = await repo.list_media(doctor_id)
     for item in media:
         item.file_uri = _build_absolute_uri(request, item.file_uri)
     return list(media)
 
-@router.delete("/media/{media_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_media(media_id: str, db: DbSession) -> None:
+
+@router.delete(
+    "/media/{media_id}",
+    status_code=http_status.HTTP_204_NO_CONTENT,
+    summary="Delete a media record (Admin/Operational only)",
+)
+async def delete_media(
+    media_id: str,
+    db: DbSession,
+    current_user: AdminOrOperationalUser,
+) -> None:
+    """Delete a ``doctor_media`` row by its UUID ``media_id``.
+
+    Requires Admin or Operational role.
+    """
     repo = OnboardingRepository(db)
     deleted = await repo.delete_media(media_id)
     if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media not found")
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Media not found.",
+        )
+    log.info("admin_media_deleted", media_id=media_id, admin_id=current_user.id)
+
 
 @router.post(
     "/media/{doctor_id}/upload",
     response_model=DoctorMediaResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Upload file for a doctor profile (Admin)",
-    description="""
-Admin endpoint to upload a file directly for a doctor profile.
-The file is stored in blob storage and metadata is saved to doctor_media table.
-
-**Supported file types:** Images (JPG, PNG, GIF), Documents (PDF)
-**Max file size:** 50MB
-    """,
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Upload a file for a doctor profile (Admin/Operational only)",
+    description=(
+        "Upload a file directly to blob storage and register its metadata in "
+        "``doctor_media``. Supported: images (JPG, PNG, GIF) and documents (PDF). "
+        "Maximum size: 50 MB."
+    ),
 )
 async def upload_media_file(
     doctor_id: int,
     media_category: str,
     db: DbSession,
+    current_user: AdminOrOperationalUser,
     field_name: str | None = None,
     file: UploadFile = File(...),
 ) -> DoctorMediaResponse:
-    """
-    Upload a file directly to blob storage and register in database.
-    
+    """Upload a file to blob storage and register it in the database.
+
+    Requires Admin or Operational role.
+
     Args:
-        doctor_id: The doctor's ID
-        media_category: Category of media (e.g., 'profile_photo', 'certificate', 'resume')
-        field_name: Logical field key used for media_urls (defaults to media_category)
-        file: The file to upload
+        doctor_id:      Numeric doctor identifier.
+        media_category: Category key, e.g. ``profile_photo``, ``certificate``, ``resume``.
+        field_name:     Logical field key for ``media_urls`` — defaults to ``media_category``.
+        file:           The multipart file upload.
     """
     repo = OnboardingRepository(db)
     blob_service = get_blob_storage_service()
 
-    # Validate doctor exists
+    # Verify the doctor exists before uploading
     identity = await repo.get_identity_by_doctor_id(doctor_id)
     if identity is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Doctor not found",
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Doctor not found.",
         )
 
-    # Read file content
     file_content = await file.read()
     file_name = file.filename or "uploaded_file"
 
-    logger.info(
-        f"Admin uploading file: doctor_id={doctor_id}, "
-        f"category={media_category}, file={file_name}, size={len(file_content)}"
+    log.info(
+        "admin_file_upload_start",
+        doctor_id=doctor_id,
+        media_category=media_category,
+        file_name=file_name,
+        size_bytes=len(file_content),
+        admin_id=current_user.id,
     )
 
-    # Upload to blob storage
     upload_result = await blob_service.upload_from_bytes(
         content=file_content,
         file_name=file_name,
@@ -196,18 +320,22 @@ async def upload_media_file(
     )
 
     if not upload_result.success:
-        logger.error(f"Blob upload failed for {file_name}: {upload_result.error_message}")
+        log.error(
+            "admin_file_upload_failed",
+            file_name=file_name,
+            error=upload_result.error_message,
+            admin_id=current_user.id,
+        )
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail=f"File upload failed: {upload_result.error_message}",
         )
 
-    # Determine media type from content type
-    media_type = "document"
-    if file.content_type and file.content_type.startswith("image/"):
-        media_type = "image"
-
-    # Save to database
+    media_type = (
+        "image"
+        if (file.content_type and file.content_type.startswith("image/"))
+        else "document"
+    )
 
     media = await repo.add_media(
         doctor_id=doctor_id,
@@ -221,260 +349,64 @@ async def upload_media_file(
     )
     media.file_uri = upload_result.file_uri
 
-    logger.info(f"Admin upload complete: media_id={media.media_id}, uri={upload_result.file_uri}")
+    log.info(
+        "admin_file_upload_complete",
+        media_id=media.media_id,
+        file_uri=upload_result.file_uri,
+        admin_id=current_user.id,
+    )
     return media
+
 
 # ---------------------------------------------------------------------------
 # doctor_status_history
 # ---------------------------------------------------------------------------
 
-@router.post("/status-history/{doctor_id}", response_model=DoctorStatusHistoryResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "/status-history/{doctor_id}",
+    response_model=DoctorStatusHistoryResponse,
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Log a status change for a doctor (Admin/Operational only)",
+)
 async def log_status_history(
     doctor_id: int,
     payload: DoctorStatusHistoryCreate,
     db: DbSession,
+    current_user: AdminOrOperationalUser,
 ) -> DoctorStatusHistoryResponse:
-    repo = OnboardingRepository(db)
-    history = await repo.log_status_change(doctor_id=doctor_id, **payload.model_dump())
-    return history
+    """Append a status-change entry to ``doctor_status_history``.
 
-@router.get("/status-history/{doctor_id}", response_model=list[DoctorStatusHistoryResponse])
-async def get_status_history(doctor_id: int, db: DbSession) -> Sequence[DoctorStatusHistoryResponse]:
-    repo = OnboardingRepository(db)
-    history = await repo.get_status_history(doctor_id)
-    return list(history)
-
-# ---------------------------------------------------------------------------
-# Helper: build DoctorIdentityResponse from the legacy doctors table row
-# ---------------------------------------------------------------------------
-
-def _build_identity_from_doctor(doctor) -> DoctorIdentityResponse:
-    """Construct a DoctorIdentityResponse from a legacy Doctor model row.
-
-    When a doctor exists only in the `doctors` table (e.g. created via OTP)
-    and has no matching `doctor_identity` row, this helper synthesises an
-    equivalent response so the admin endpoints can return consistent data.
+    Requires Admin or Operational role.
     """
-    from datetime import UTC, datetime
-
-    return DoctorIdentityResponse(
-        id=str(doctor.id),
-        doctor_id=doctor.id,
-        title=doctor.title,
-        first_name=doctor.first_name or "",
-        last_name=doctor.last_name or "",
-        email=doctor.email,
-        phone_number=doctor.phone or "",
-        onboarding_status=doctor.onboarding_status or "pending",
-        status_updated_at=None,
-        status_updated_by=None,
-        rejection_reason=None,
-        verified_at=None,
-        is_active=True,
-        registered_at=doctor.created_at or datetime.now(UTC),
-        created_at=doctor.created_at or datetime.now(UTC),
-        updated_at=doctor.updated_at or doctor.created_at or datetime.now(UTC),
-        deleted_at=None,
+    repo = OnboardingRepository(db)
+    log.info(
+        "admin_status_history_log",
+        doctor_id=doctor_id,
+        admin_id=current_user.id,
     )
+    return await repo.log_status_change(doctor_id=doctor_id, **payload.model_dump())
 
-
-# ---------------------------------------------------------------------------
-# Aggregated doctor endpoints (use doctors table as primary source)
-# ---------------------------------------------------------------------------
-
-@router.get("/doctors/full", response_model=list[DoctorWithFullInfoResponse])
-async def list_doctors_with_full_info(db: DbSession) -> list[DoctorWithFullInfoResponse]:
-    """Fetch all doctors with identity, details, media, and status history.
-
-    Intended for admin/internal use to get a complete view of each doctor.
-    Uses the primary `doctors` table as the source of truth and enriches
-    with onboarding data when available.
-    """
-
-    from ....repositories.doctor_repository import DoctorRepository
-
-    repo = OnboardingRepository(db)
-    doctor_repo = DoctorRepository(db)
-
-    all_doctors = await doctor_repo.get_all(skip=0, limit=10000)
-    doctors: list[DoctorWithFullInfoResponse] = []
-
-    for doctor in all_doctors:
-        identity = await repo.get_identity_by_doctor_id(doctor.id)
-        if identity is not None:
-            identity_resp = DoctorIdentityResponse.model_validate(identity)
-        else:
-            identity_resp = _build_identity_from_doctor(doctor)
-
-        details = await repo.get_details_by_doctor_id(doctor.id)
-        media = await repo.list_media(doctor.id)
-        status_history = await repo.get_status_history(doctor.id)
-
-        doctors.append(
-            DoctorWithFullInfoResponse(
-                identity=identity_resp,
-                details=DoctorDetailsResponse.model_validate(details) if details else None,
-                media=[DoctorMediaResponse.model_validate(m) for m in media],
-                status_history=[DoctorStatusHistoryResponse.model_validate(h) for h in status_history],
-            )
-        )
-
-    return doctors
 
 @router.get(
-    "/doctors",
-    response_model=PaginatedResponse[DoctorWithFullInfoResponse],
-    summary="List doctors with optional status filter",
-    description="""
-Admin endpoint to list doctors with filtering and pagination.
-
-**Filter Options:**
-- `status`: Filter by onboarding status (PENDING, SUBMITTED, VERIFIED, REJECTED)
-- `page`: Page number (default: 1)
-- `page_size`: Items per page (default: 20, max: 100)
-
-**Example Usage:**
-- Get pending doctors: `GET /onboarding-admin/doctors?status=pending`
-- Get verified doctors: `GET /onboarding-admin/doctors?status=verified`
-- Get all doctors (page 2): `GET /onboarding-admin/doctors?page=2`
-    """,
+    "/status-history/{doctor_id}",
+    response_model=list[DoctorStatusHistoryResponse],
+    summary="Fetch status history for a doctor (Admin/Operational only)",
 )
-async def list_doctors_with_filter(
+async def get_status_history(
+    doctor_id: int,
     db: DbSession,
-    status: OnboardingStatusEnum | None = Query(
-        default=None,
-        description="Filter by onboarding status"
-    ),
-    page: int = Query(default=1, ge=1, description="Page number"),
-    page_size: int = Query(default=20, ge=1, le=100, description="Items per page"),
-) -> PaginatedResponse[DoctorWithFullInfoResponse]:
-    """List doctors with optional status filter and pagination."""
+    current_user: AdminOrOperationalUser,
+) -> Sequence[DoctorStatusHistoryResponse]:
+    """Return all status-history entries for ``doctor_id``.
 
-    from ....repositories.doctor_repository import DoctorRepository
-
+    Requires Admin or Operational role.
+    """
     repo = OnboardingRepository(db)
-    doctor_repo = DoctorRepository(db)
+    return list(await repo.get_status_history(doctor_id))
 
-    skip = (page - 1) * page_size
 
-    if status is not None:
-        # When filtering by status, use the onboarding identity table
-        identities = await repo.list_identities(
-            status=status.value if status else None,
-            skip=skip,
-            limit=page_size,
-        )
-        total = await repo.count_identities_by_status(
-            status=status.value if status else None
-        )
-
-        doctors: list[DoctorWithFullInfoResponse] = []
-        for identity in identities:
-            details = await repo.get_details_by_doctor_id(identity.doctor_id)
-            media = await repo.list_media(identity.doctor_id)
-            status_history = await repo.get_status_history(identity.doctor_id)
-
-            doctors.append(
-                DoctorWithFullInfoResponse(
-                    identity=identity,
-                    details=details,
-                    media=list(media),
-                    status_history=list(status_history),
-                )
-            )
-    else:
-        # No status filter: use the primary doctors table as source of truth
-        all_doctors = await doctor_repo.get_all(skip=skip, limit=page_size)
-        total = await doctor_repo.count()
-
-        doctors = []
-        for doctor in all_doctors:
-            identity = await repo.get_identity_by_doctor_id(doctor.id)
-            if identity is not None:
-                identity_resp = DoctorIdentityResponse.model_validate(identity)
-            else:
-                identity_resp = _build_identity_from_doctor(doctor)
-
-            details = await repo.get_details_by_doctor_id(doctor.id)
-            media = await repo.list_media(doctor.id)
-            status_history = await repo.get_status_history(doctor.id)
-
-            doctors.append(
-                DoctorWithFullInfoResponse(
-                    identity=identity_resp,
-                    details=DoctorDetailsResponse.model_validate(details) if details else None,
-                    media=[DoctorMediaResponse.model_validate(m) for m in media],
-                    status_history=[DoctorStatusHistoryResponse.model_validate(h) for h in status_history],
-                )
-            )
-
-    return PaginatedResponse(
-        message=f"Found {total} doctor(s)" + (f" with status '{status.value}'" if status else ""),
-        data=doctors,
-        pagination=PaginationMeta.from_total(total=total, page=page, page_size=page_size),
-    )
-
-@router.get("/doctors/lookup", response_model=DoctorWithFullInfoResponse)
-async def get_doctor_with_full_info(
-    doctor_id: int | None = Query(None, description="Lookup by doctor ID"),
-    email: str | None = Query(None, description="Lookup by email address"),
-    phone: str | None = Query(None, description="Lookup by phone number"),
-    db: DbSession = None,
-) -> DoctorWithFullInfoResponse:
-    """Fetch a single doctor's complete onboarding data by ID, email, or phone."""
-
-    from ....repositories.doctor_repository import DoctorRepository
-
-    repo = OnboardingRepository(db)
-    doctor_repo = DoctorRepository(db)
-
-    identity = None
-    doctor = None
-    resolved_doctor_id = doctor_id
-
-    if doctor_id:
-        identity = await repo.get_identity_by_doctor_id(doctor_id)
-        if not identity:
-            doctor = await doctor_repo.get_by_id(doctor_id)
-            
-    elif email:
-        identity = await repo.get_identity_by_email(email)
-        if identity:
-            resolved_doctor_id = identity.doctor_id
-        else:
-            doctor = await doctor_repo.get_by_email(email)
-            if doctor:
-                resolved_doctor_id = doctor.id
-                
-    elif phone:
-        identity = await repo.get_identity_by_phone(phone)
-        if identity:
-            resolved_doctor_id = identity.doctor_id
-        else:
-            # Need to format phone number to E.164 if they just pass 10 digits
-            formatted_phone = phone if phone.startswith('+') else f"+91{phone}"
-            doctor = await doctor_repo.get_by_phone_number(formatted_phone)
-            # Try original just in case it's in another format
-            if not doctor and not phone.startswith('+'):
-                 doctor = await doctor_repo.get_by_phone_number(phone)
-                 
-            if doctor:
-                resolved_doctor_id = doctor.id
-    else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Must provide doctor_id, email, or phone")
-
-    if identity is None and doctor is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor not found")
-        
-    identity_resp = DoctorIdentityResponse.model_validate(identity) if identity else _build_identity_from_doctor(doctor)
-
-    details = await repo.get_details_by_doctor_id(resolved_doctor_id)
-    media = await repo.list_media(resolved_doctor_id)
-    status_history = await repo.get_status_history(resolved_doctor_id)
-
-    return DoctorWithFullInfoResponse(
-        identity=identity_resp,
-        details=DoctorDetailsResponse.model_validate(details) if details else None,
-        media=[DoctorMediaResponse.model_validate(m) for m in media],
-        status_history=[DoctorStatusHistoryResponse.model_validate(h) for h in status_history],
-    )
+# NOTE: The aggregated list and lookup routes that were previously here
+# (GET /onboarding-admin/doctors and GET /onboarding-admin/doctors/lookup)
+# have been consolidated into GET /doctors and GET /doctors/lookup
+# in src/app/api/v1/endpoints/doctors.py to reduce API surface duplication.

@@ -187,7 +187,7 @@ class LocalBlobStorageService:
     def _ensure_base_directory(self) -> None:
         """Create base storage directory if it doesn't exist."""
         self.base_path.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Blob storage initialized at: {self.base_path.absolute()}")
+        logger.info("Blob storage initialized at: %s", self.base_path.absolute())
 
     def _get_blob_directory(self, doctor_id: int, media_category: str) -> Path:
         """Get the directory path for storing a blob."""
@@ -354,8 +354,10 @@ class LocalBlobStorageService:
         """
         try:
             logger.info(
-                f"Downloading blob from URL: {source_url} "
-                f"for doctor_id={doctor_id}, category={media_category}"
+                "Downloading blob from URL: %s for doctor_id=%d, category=%s",
+                source_url,
+                doctor_id,
+                media_category,
             )
 
             # Download content
@@ -375,7 +377,7 @@ class LocalBlobStorageService:
         except BlobDownloadError:
             raise
         except Exception as e:
-            logger.error(f"Unexpected error uploading from URL: {e}")
+            logger.error("Unexpected error uploading from URL: %s", e)
             raise BlobUploadError(f"Failed to upload blob from URL: {e}", e)
 
     async def upload_from_bytes(
@@ -428,8 +430,10 @@ class LocalBlobStorageService:
             await self._write_blob(content, blob_path, metadata)
 
             logger.info(
-                f"Blob uploaded successfully: blob_id={blob_id}, "
-                f"size={len(content)} bytes, path={blob_path}"
+                "Blob uploaded successfully: blob_id=%s, size=%d bytes, path=%s",
+                blob_id,
+                len(content),
+                blob_path,
             )
 
             return UploadResult(
@@ -442,7 +446,7 @@ class LocalBlobStorageService:
             )
 
         except Exception as e:
-            logger.error(f"Error uploading blob: {e}")
+            logger.error("Error uploading blob: %s", e)
             return UploadResult(
                 success=False,
                 blob_id="",
@@ -537,10 +541,6 @@ class LocalBlobStorageService:
 
 # ---------------------------------------------------------------------------
 # Singleton instance and dependency injection
-# This will be added to blob_storage_service.py
-
-import aioboto3
-from botocore.exceptions import BotoCoreError, ClientError
 
 
 class S3BlobStorageService:
@@ -602,7 +602,7 @@ class S3BlobStorageService:
             region_name=region,
         )
 
-        logger.info(f"S3 blob storage initialized: bucket={bucket_name}, region={region}, prefix={prefix}")
+        logger.info("S3 blob storage initialized: bucket=%s, region=%s, prefix=%s", bucket_name, region, prefix)
 
     def _get_s3_key(
         self,
@@ -697,7 +697,7 @@ class S3BlobStorageService:
         except BlobDownloadError:
             raise
         except Exception as e:
-            logger.exception(f"Failed to upload from URL: {source_url}")
+            logger.exception("Failed to upload from URL: %s", source_url)
             raise BlobUploadError(f"Upload from URL failed: {str(e)}", e)
 
     async def upload_from_bytes(
@@ -739,7 +739,10 @@ class S3BlobStorageService:
             file_uri = await self.get_blob_uri(blob_id, doctor_id, media_category, extension)
 
             logger.info(
-                f"Uploaded to S3: blob_id={blob_id}, key={s3_key}, size={file_size}"
+                "Uploaded to S3: blob_id=%s, key=%s, size=%d",
+                blob_id,
+                s3_key,
+                file_size,
             )
 
             return UploadResult(
@@ -752,7 +755,7 @@ class S3BlobStorageService:
             )
 
         except (ClientError, BotoCoreError) as e:
-            logger.exception(f"S3 upload failed for {file_name}")
+            logger.exception("S3 upload failed for %s", file_name)
             return UploadResult(
                 success=False,
                 blob_id="",
@@ -792,9 +795,13 @@ class S3BlobStorageService:
 
                 return content, metadata
 
-        except s3_client.exceptions.NoSuchKey:
-            raise BlobNotFoundError(f"Blob not found: {blob_id}")
-        except (ClientError, BotoCoreError) as e:
+        except ClientError as e:
+            # NoSuchKey is a ClientError — s3_client.exceptions is not accessible
+            # outside the async-with block scope, so we inspect the error code.
+            if e.response.get("Error", {}).get("Code") == "NoSuchKey":
+                raise BlobNotFoundError(f"Blob not found: {blob_id}")
+            raise BlobStorageError(f"S3 retrieval failed: {str(e)}", e)
+        except BotoCoreError as e:
             raise BlobStorageError(f"S3 retrieval failed: {str(e)}", e)
 
     async def delete_blob(self, blob_id: str, doctor_id: int, media_category: str, extension: str) -> bool:
@@ -808,11 +815,11 @@ class S3BlobStorageService:
                     Key=s3_key,
                 )
 
-            logger.info(f"Deleted from S3: key={s3_key}")
+            logger.info("Deleted from S3: key=%s", s3_key)
             return True
 
         except (ClientError, BotoCoreError) as e:
-            logger.error(f"S3 deletion failed: {str(e)}")
+            logger.error("S3 deletion failed: %s", str(e))
             return False
 
     async def get_blob_uri(self, blob_id: str, doctor_id: int = 0, media_category: str = "", extension: str = "") -> str:
@@ -851,9 +858,12 @@ class S3BlobStorageService:
                 )
             return True
 
-        except s3_client.exceptions.NoSuchKey:
+        except ClientError as e:
+            # 404 head_object raises ClientError with code "404" or "NoSuchKey"
+            if e.response.get("Error", {}).get("Code") in ("404", "NoSuchKey"):
+                return False
             return False
-        except (ClientError, BotoCoreError):
+        except BotoCoreError:
             return False
 
 
@@ -910,7 +920,7 @@ class BlobStorageFactory:
                     "Set it in your .env file or environment variables."
                 )
 
-            logger.info(f"Initializing S3 blob storage: bucket={settings.AWS_S3_BUCKET}, region={settings.AWS_REGION}")
+            logger.info("Initializing S3 blob storage: bucket=%s, region=%s", settings.AWS_S3_BUCKET, settings.AWS_REGION)
             return S3BlobStorageService(
                 bucket_name=settings.AWS_S3_BUCKET,
                 access_key_id=settings.AWS_ACCESS_KEY_ID,
@@ -959,9 +969,3 @@ def get_blob_storage_service() -> LocalBlobStorageService | S3BlobStorageService
         _blob_storage_instance = BlobStorageFactory.create_blob_service(settings)
 
     return _blob_storage_instance
-
-
-def reset_blob_storage_service() -> None:
-    """Reset the singleton instance (useful for testing)."""
-    global _blob_storage_instance
-    _blob_storage_instance = None

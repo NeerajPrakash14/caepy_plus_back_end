@@ -4,9 +4,9 @@ Doctor Repository.
 Data access layer for doctor entities using SQLAlchemy 2.0 async patterns.
 Follows the Repository pattern for clean separation of concerns.
 """
-import logging
 from collections.abc import Sequence
 
+import structlog
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,7 +14,7 @@ from ..core.exceptions import DoctorAlreadyExistsError, DoctorNotFoundError
 from ..models.doctor import Doctor
 from ..schemas.doctor import DoctorCreate, DoctorUpdate, PracticeLocationBase
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class DoctorRepository:
@@ -42,10 +42,13 @@ class DoctorRepository:
         Raises:
             DoctorAlreadyExistsError: If email already exists
         """
-        # Check for existing email
-        existing = await self.get_by_email(data.email)
+        # Normalize email to lowercase before any lookup or persist.
+        # get_by_email() lowercases on every lookup — persisting in mixed-case
+        # would cause a unique-constraint miss on a subsequent login attempt.
+        normalized_email = data.email.lower() if data.email else data.email
+        existing = await self.get_by_email(normalized_email) if normalized_email else None
         if existing:
-            raise DoctorAlreadyExistsError(data.email)
+            raise DoctorAlreadyExistsError(normalized_email)
 
         # Create doctor entity with qualifications as JSON
         doctor = Doctor(
@@ -91,12 +94,13 @@ class DoctorRepository:
             gender=data.gender,
             first_name=data.first_name,
             last_name=data.last_name,
-            email=data.email,
+            email=normalized_email,
             phone=data.phone_number,
             primary_specialization=data.primary_specialization,
             years_of_experience=data.years_of_experience,
             consultation_fee=data.consultation_fee,
             medical_registration_number=data.medical_registration_number,
+            medical_council=data.medical_council,
             sub_specialties=data.sub_specialties,
             areas_of_expertise=data.areas_of_expertise,
             languages=data.languages,
@@ -111,7 +115,7 @@ class DoctorRepository:
         await self.session.commit()
         await self.session.refresh(doctor)
 
-        logger.info(f"Created doctor: {doctor.id} ({doctor.email})")
+        logger.info("Created doctor", doctor_id=doctor.id, email=doctor.email)
 
         return doctor
 
@@ -182,17 +186,15 @@ class DoctorRepository:
         Returns:
             List of doctor entities
         """
-        query = (
-            select(Doctor)
-            .order_by(Doctor.created_at.desc())
-            .offset(skip)
-            .limit(limit)
-        )
+        query = select(Doctor).order_by(Doctor.created_at.desc())
 
+        # Apply filters BEFORE offset/limit for correct pagination
         if specialization:
             query = query.where(
                 Doctor.primary_specialization.ilike(f"%{specialization}%")
             )
+
+        query = query.offset(skip).limit(limit)
 
         result = await self.session.execute(query)
         return result.scalars().all()
@@ -250,11 +252,10 @@ class DoctorRepository:
             if hasattr(doctor, model_field):
                 setattr(doctor, model_field, value)
 
-
         await self.session.commit()
         await self.session.refresh(doctor)
 
-        logger.info(f"Updated doctor: {doctor_id}")
+        logger.info("Updated doctor", doctor_id=doctor_id)
 
         return doctor
 
@@ -283,15 +284,14 @@ class DoctorRepository:
             # Add +91 for Indian numbers
             normalized_phone = '+91' + ''.join(c for c in normalized_phone if c.isdigit())
 
-        # Create minimal doctor record
-        # Using phone number as temporary placeholder for required fields
-        # Other fields (primary_specialization, medical_registration_number, etc.)
-        # will be filled during onboarding
+        # Create minimal doctor record.
+        # email stays NULL — fake placeholders block future real email updates
+        # and pollute get_by_email().
         doctor = Doctor(
             phone=normalized_phone,
-            first_name="",  # Will be filled during onboarding
-            last_name="",   # Will be filled during onboarding
-            email=f"pending_{normalized_phone.replace('+', '')}@placeholder.local",  # Temporary placeholder
+            first_name="",   # Filled during onboarding
+            last_name="",    # Filled during onboarding
+            email=None,      # Provided during onboarding
             role=role,
         )
 
@@ -299,7 +299,7 @@ class DoctorRepository:
         await self.session.commit()
         await self.session.refresh(doctor)
 
-        logger.info(f"Created doctor from phone: {doctor.id} ({normalized_phone})")
+        logger.info("Created doctor from phone", doctor_id=doctor.id, phone=normalized_phone)
 
         return doctor
 
@@ -333,7 +333,7 @@ class DoctorRepository:
             email=email.lower(),
             first_name=first_name,
             last_name=last_name,
-            phone="",  # Will be filled during onboarding
+            phone=None,  # Provided during onboarding (Google users may not have one)
             role=role,
         )
 
@@ -341,7 +341,7 @@ class DoctorRepository:
         await self.session.commit()
         await self.session.refresh(doctor)
 
-        logger.info(f"Created doctor from email: {doctor.id} ({email})")
+        logger.info("Created doctor from email", doctor_id=doctor.id, email=email)
 
         return doctor
 
@@ -362,7 +362,7 @@ class DoctorRepository:
         await self.session.delete(doctor)
         await self.session.commit()
 
-        logger.info(f"Deleted doctor: {doctor_id}")
+        logger.info("Deleted doctor", doctor_id=doctor_id)
 
         return True
 

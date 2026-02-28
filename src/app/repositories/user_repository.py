@@ -1,25 +1,17 @@
-"""
-User Repository - Data access layer for RBAC users.
-
-Provides methods for:
-- Creating and managing users
-- Looking up users by phone/email
-- Role and status management
-- Linking users to doctors
-"""
+"""User Repository - Data access layer for RBAC users."""
 from __future__ import annotations
 
-import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, select, update
+import structlog
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.enums import UserRole
 from ..models.user import User
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 
 class UserRepository:
@@ -58,7 +50,7 @@ class UserRepository:
         query = select(User).where(
             and_(
                 User.phone == normalized,
-                User.is_active == True,
+                User.is_active.is_(True),
             )
         )
         result = await self.session.execute(query)
@@ -90,9 +82,28 @@ class UserRepository:
         """Get all admin users."""
         query = select(User).where(User.role == UserRole.ADMIN.value)
         if active_only:
-            query = query.where(User.is_active == True)
+            query = query.where(User.is_active.is_(True))
         result = await self.session.execute(query)
         return result.scalars().all()
+
+    async def count_all(
+        self,
+        role: str | list[str] | None = None,
+        is_active: bool | None = None,
+    ) -> int:
+        """Count total users matching the same filters as get_all."""
+        query = select(func.count(User.id))
+
+        if role:
+            if isinstance(role, list):
+                query = query.where(User.role.in_(role))
+            else:
+                query = query.where(User.role == role)
+        if is_active is not None:
+            query = query.where(User.is_active.is_(is_active))
+
+        result = await self.session.execute(query)
+        return result.scalar_one()
 
     # =========================================================================
     # CREATE OPERATIONS
@@ -121,7 +132,7 @@ class UserRepository:
         await self.session.commit()
         await self.session.refresh(user)
 
-        logger.info(f"Created user: id={user.id}, phone={normalized_phone}, role={role}")
+        log.info("user_created", user_id=user.id, role=role)
         return user
 
     async def create_from_doctor(
@@ -169,6 +180,44 @@ class UserRepository:
     # UPDATE OPERATIONS
     # =========================================================================
 
+    async def update_fields(
+        self,
+        user_id: int,
+        *,
+        role: str | None = None,
+        is_active: bool | None = None,
+        doctor_id: int | None = None,
+    ) -> User | None:
+        """Apply one or more field updates to a user in a single transaction.
+
+        Use this instead of chaining ``update_role`` / ``set_active`` /
+        ``link_doctor`` separately, which would issue multiple sequential
+        commits and leave the row in a partially-updated state if any step
+        fails after the first commit.
+
+        Returns the refreshed User or None if not found.
+        """
+        user = await self.get_by_id(user_id)
+        if not user:
+            return None
+
+        now = datetime.now(UTC)
+        if role is not None:
+            old_role = user.role
+            user.role = role
+            log.info("user_role_staged", user_id=user_id, old_role=old_role, new_role=role)
+        if is_active is not None:
+            user.is_active = is_active
+            log.info("user_active_staged", user_id=user_id, is_active=is_active)
+        if doctor_id is not None:
+            user.doctor_id = doctor_id
+            log.info("user_doctor_linked_staged", user_id=user_id, doctor_id=doctor_id)
+        user.updated_at = now
+
+        await self.session.commit()
+        await self.session.refresh(user)
+        return user
+
     async def update_role(self, user_id: int, role: str) -> User | None:
         """Update user's role."""
         user = await self.get_by_id(user_id)
@@ -181,7 +230,7 @@ class UserRepository:
         await self.session.commit()
         await self.session.refresh(user)
 
-        logger.info(f"Updated user role: id={user_id}, {old_role} -> {role}")
+        log.info("user_role_updated", user_id=user_id, old_role=old_role, new_role=role)
         return user
 
     async def set_active(self, user_id: int, is_active: bool) -> User | None:
@@ -195,8 +244,8 @@ class UserRepository:
         await self.session.commit()
         await self.session.refresh(user)
 
-        status = "activated" if is_active else "deactivated"
-        logger.info(f"User {status}: id={user_id}")
+        action = "user_activated" if is_active else "user_deactivated"
+        log.info(action, user_id=user_id)
         return user
 
     async def deactivate(self, user_id: int) -> User | None:
@@ -228,7 +277,7 @@ class UserRepository:
         await self.session.commit()
         await self.session.refresh(user)
 
-        logger.info(f"Linked user {user_id} to doctor {doctor_id}")
+        log.info("user_doctor_linked", user_id=user_id, doctor_id=doctor_id)
         return user
 
     # =========================================================================
@@ -244,7 +293,7 @@ class UserRepository:
         await self.session.delete(user)
         await self.session.commit()
 
-        logger.info(f"Deleted user: id={user_id}")
+        log.info("user_deleted", user_id=user_id)
         return True
 
     # =========================================================================
@@ -268,18 +317,36 @@ class UserRepository:
     # =========================================================================
 
     def _normalize_phone(self, phone: str) -> str:
-        """Normalize phone number to +91XXXXXXXXXX format."""
-        normalized = phone.strip()
-        if not normalized:
-            return normalized
+        """Normalize an Indian mobile phone number to E.164 (+91XXXXXXXXXX) format.
 
-        # Extract only digits
-        digits_only = ''.join(c for c in normalized if c.isdigit())
+        Handles these common input variants:
+          +919988776655   → +919988776655  (already E.164, returned as-is)
+          919988776655    → +919988776655  (91-prefixed without +)
+          9988776655      → +919988776655  (bare 10-digit Indian number)
+          09988776655     → +919988776655  (leading 0, domestic format)
 
-        # Handle different input formats
-        if digits_only.startswith('91') and len(digits_only) == 12:
-            # Already has country code
-            return '+' + digits_only
-        else:
-            # Add +91 for Indian numbers
-            return '+91' + digits_only
+        Numbers already starting with '+' are returned unchanged so that
+        non-Indian numbers (e.g. +1-555-0123) pass through correctly and
+        can be looked up by their stored value.
+        """
+        stripped = phone.strip()
+        if not stripped:
+            return stripped
+
+        # If the caller already supplied a properly formatted E.164 number, trust it.
+        if stripped.startswith("+"):
+            return stripped
+
+        digits_only = "".join(c for c in stripped if c.isdigit())
+
+        if digits_only.startswith("91") and len(digits_only) == 12:
+            # e.g. 919988776655
+            return "+" + digits_only
+        if digits_only.startswith("0") and len(digits_only) == 11:
+            # e.g. 09988776655 → strip leading 0, add +91
+            return "+91" + digits_only[1:]
+        if len(digits_only) == 10:
+            # Bare 10-digit Indian number
+            return "+91" + digits_only
+        # Unrecognised format — store as-is to avoid silent corruption
+        return stripped

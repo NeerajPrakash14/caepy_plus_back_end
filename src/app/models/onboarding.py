@@ -26,6 +26,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy import (
     Enum as SQLEnum,
@@ -39,16 +40,18 @@ def utc_now() -> datetime:
     """Return current UTC time (timezone-aware)."""
     return datetime.now(UTC)
 
+
 class OnboardingStatus(str, Enum):
     """Onboarding status enum used by doctor_identity.
 
-    Allowed values (SQLite-friendly): pending, submitted, verified, rejected.
+    Allowed values: pending, submitted, verified, rejected.
     """
 
     PENDING = "pending"
     SUBMITTED = "submitted"
     VERIFIED = "verified"
     REJECTED = "rejected"
+
 
 class DoctorTitle(str, Enum):
     """Doctor title enum used by doctor_identity.
@@ -59,6 +62,7 @@ class DoctorTitle(str, Enum):
     DR = "dr"
     PROF = "prof"
     PROF_DR = "prof.dr"
+
 
 class DoctorIdentity(Base):
     """doctor_identity table - basic identification and contact information."""
@@ -73,7 +77,6 @@ class DoctorIdentity(Base):
 
     doctor_id: Mapped[int] = mapped_column(
         BigInteger,
-        autoincrement=True,
         nullable=False,
         unique=True,
         index=True,
@@ -93,6 +96,7 @@ class DoctorIdentity(Base):
         SQLEnum(OnboardingStatus, name="onboarding_status_enum", native_enum=False),
         nullable=False,
         default=OnboardingStatus.PENDING,
+        index=True,
     )
 
     status_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -201,6 +205,7 @@ class DoctorDetails(Base):
     sub_specialities: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     areas_of_expertise: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     registration_number: Mapped[str | None] = mapped_column(String(100), nullable=True, unique=True)
+    medical_council: Mapped[str | None] = mapped_column(String(200), nullable=True)
     registration_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     registration_authority: Mapped[str | None] = mapped_column(String(100), nullable=True)
     consultation_fee: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -234,6 +239,7 @@ class DoctorDetails(Base):
     )
 
     identity: Mapped[DoctorIdentity] = relationship(back_populates="details")
+
 
 class DoctorMedia(Base):
     """doctor_media table - references to media files (URIs/metadata)."""
@@ -281,20 +287,74 @@ class DoctorMedia(Base):
 
     identity: Mapped[DoctorIdentity] = relationship(back_populates="media")
 
+
+class DropdownOptionStatus(str, Enum):
+    """Approval status for a user-submitted dropdown option.
+
+    - APPROVED  : visible in all public-facing dropdowns (seed data starts here)
+    - PENDING   : submitted by a doctor/user; hidden until admin approves
+    - REJECTED  : admin-rejected; never shown to end users
+    """
+
+    APPROVED = "approved"
+    PENDING = "pending"
+    REJECTED = "rejected"
+
+
 class DropdownOption(Base):
     """dropdown_options table - configurable dropdown values by field.
 
-    Stores additional values for dropdown fields (e.g., specialisations,
-    sub_specialisations, degrees) that are not yet present in any
-    doctor_details row but should be available in onboarding forms.
+    Stores curated values for dropdown fields (e.g., specialisations,
+    qualifications, languages) used by the onboarding forms.
+
+    Workflow
+    --------
+    * Seed / admin-added rows start with ``status = APPROVED``.
+    * Doctor/user-submitted rows start with ``status = PENDING`` and are
+      hidden from public dropdowns until an Admin or Operational user
+      approves them.
+    * The unique constraint on (field_name, value) makes inserts idempotent.
+
+    All columns (including the approval-workflow fields) were created in
+    the consolidated 001_initial_schema migration.
     """
 
     __tablename__ = "dropdown_options"
+    __table_args__ = (
+        UniqueConstraint("field_name", "value", name="uq_dropdown_field_value"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     field_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     value: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # Human-readable display label (defaults to value when not set)
+    label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Approval workflow
+    status: Mapped[DropdownOptionStatus] = mapped_column(
+        SQLEnum(DropdownOptionStatus, name="dropdown_option_status_enum", native_enum=False),
+        nullable=False,
+        default=DropdownOptionStatus.APPROVED,
+        index=True,
+    )
+
+    # System / seed rows cannot be deleted by users
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # Display ordering within a field (lower = first)
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Who submitted this option (for PENDING rows)
+    submitted_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    submitted_by_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Who reviewed this option (admin/operational user)
+    reviewed_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    reviewed_by_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -304,6 +364,7 @@ class DropdownOption(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
     )
+
 
 class DoctorStatusHistory(Base):
     """doctor_status_history table - audit log of status changes."""

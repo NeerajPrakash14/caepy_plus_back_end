@@ -1,10 +1,10 @@
 """Voice Onboarding API Router."""
 from __future__ import annotations
 
-import logging
 from datetime import datetime
 from typing import Annotated, Any
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
@@ -16,7 +16,7 @@ from ....services.voice_service import (
     get_voice_service,
 )
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/voice", tags=["Voice Onboarding"])
 
@@ -188,15 +188,11 @@ class FinalizeResponse(BaseModel):
     }
 
 
-def get_voice_svc() -> VoiceOnboardingService:
-    return get_voice_service()
-
-
-VoiceServiceDep = Annotated[VoiceOnboardingService, Depends(get_voice_svc)]
+VoiceServiceDep = Annotated[VoiceOnboardingService, Depends(get_voice_service)]
 
 
 def build_fields_status(session: VoiceSession) -> list[FieldStatusItem]:
-    active_config = session._get_active_config()
+    active_config = session.get_active_config()
     return [
         FieldStatusItem(
             field_name=field_name,
@@ -255,7 +251,7 @@ async def start_session(
         initial_data=initial_data
     )
     # Calculate fields total based on active config (context or default)
-    active_config = session._get_active_config()
+    active_config = session.get_active_config()
     return StartSessionResponse(
         session_id=session.session_id,
         status=session.status.value,
@@ -295,14 +291,18 @@ AI: "Nice to meet you, Dr. Johnson! I've noted your specialization as Cardiology
         410: {"description": "Session expired"},
     },
 )
-async def process_chat(request: ChatRequest, service: VoiceServiceDep) -> ChatResponse:
+async def process_chat(
+    request: ChatRequest,
+    service: VoiceServiceDep,
+    current_user: CurrentUser,
+) -> ChatResponse:
     try:
         session, ai_response = await service.process_message(
             session_id=request.session_id,
             user_message=request.user_transcript,
             context=request.context,
         )
-        active_config = session._get_active_config()
+        active_config = session.get_active_config()
         return ChatResponse(
             session_id=session.session_id,
             status=session.status.value,
@@ -341,10 +341,14 @@ Retrieve the current status of a voice onboarding session.
         410: {"description": "Session expired"},
     },
 )
-async def get_session_status(session_id: str, service: VoiceServiceDep) -> SessionStatusResponse:
+async def get_session_status(
+    session_id: str,
+    service: VoiceServiceDep,
+    current_user: CurrentUser,
+) -> SessionStatusResponse:
     try:
         session = await service.get_session_status(session_id)
-        active_config = session._get_active_config()
+        active_config = session.get_active_config()
         return SessionStatusResponse(
             session_id=session.session_id,
             status=session.status.value,
@@ -393,13 +397,17 @@ Finalize a completed voice onboarding session and get the doctor data.
         410: {"description": "Session expired"},
     },
 )
-async def finalize_session(session_id: str, service: VoiceServiceDep) -> FinalizeResponse:
+async def finalize_session(
+    session_id: str,
+    service: VoiceServiceDep,
+    current_user: CurrentUser,
+) -> FinalizeResponse:
     try:
         session = await service.get_session_status(session_id)
 
         if not session.is_complete:
             # Get missing fields for better error message
-            active_config = session._get_active_config()
+            active_config = session.get_active_config()
             missing_fields = [
                 active_config[field]["display"]
                 for field in session.missing_fields
@@ -451,7 +459,11 @@ Cancel and delete a voice onboarding session.
         404: {"description": "Session not found"},
     },
 )
-async def cancel_session(session_id: str, service: VoiceServiceDep) -> None:
+async def cancel_session(
+    session_id: str,
+    service: VoiceServiceDep,
+    current_user: CurrentUser,
+) -> None:
     try:
         await service.cancel_session(session_id)
     except SessionNotFoundError:

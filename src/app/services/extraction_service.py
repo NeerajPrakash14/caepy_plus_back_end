@@ -100,7 +100,7 @@ class ResumeExtractionService:
 
         mime_type = self._get_mime_type(filename)
 
-        logger.info(f"Extracting data from {filename} ({mime_type})")
+        logger.info("Extracting data from %s (%s)", filename, mime_type)
 
         try:
             # Get prompt from external config
@@ -119,17 +119,14 @@ class ResumeExtractionService:
 
             processing_time = (time.time() - start_time) * 1000
 
-            logger.info(
-                f"Successfully extracted data from {filename} "
-                f"in {processing_time:.2f}ms"
-            )
+            logger.info("Successfully extracted data from %s in %.2fms", filename, processing_time)
 
             return extracted_data, processing_time
 
         except ExtractionError:
             raise
         except Exception as e:
-            logger.error(f"Failed to extract from {filename}: {e}")
+            logger.error("Failed to extract from %s: %s", filename, e)
             raise ExtractionError(
                 message="Failed to extract data from resume",
                 source="resume",
@@ -153,7 +150,7 @@ class ResumeExtractionService:
         """
         start_time = time.time()
 
-        logger.info(f"Extracting from text ({len(text_content)} chars)")
+        logger.info("Extracting from text (%d chars)", len(text_content))
 
         try:
             extraction_prompt = self._get_extraction_prompt()
@@ -167,14 +164,14 @@ class ResumeExtractionService:
             extracted_data = ResumeExtractedData(**parsed_data)
             processing_time = (time.time() - start_time) * 1000
 
-            logger.info(f"Text extraction completed in {processing_time:.2f}ms")
+            logger.info("Text extraction completed in %.2fms", processing_time)
 
             return extracted_data, processing_time
 
         except ExtractionError:
             raise
         except Exception as e:
-            logger.error(f"Text extraction failed: {e}")
+            logger.error("Text extraction failed: %s", e)
             raise ExtractionError(
                 message="Failed to extract data from text",
                 source="text",

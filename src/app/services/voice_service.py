@@ -180,7 +180,7 @@ class VoiceSession:
         """Check if session has expired."""
         return datetime.now(UTC) > self.expires_at
 
-    def _get_active_config(self) -> dict[str, dict[str, Any]]:
+    def get_active_config(self) -> dict[str, dict[str, Any]]:
         """
         Get active field configuration.
         Prioritizes context-specific fields from metadata over global defaults.
@@ -201,7 +201,7 @@ class VoiceSession:
     @property
     def collected_fields(self) -> list[str]:
         """List of successfully collected field names."""
-        config = self._get_active_config()
+        config = self.get_active_config()
         return [
             f for f, cfg in config.items()
             if f in self.collected_data and cfg["validator"](self.collected_data[f])
@@ -210,7 +210,7 @@ class VoiceSession:
     @property
     def missing_fields(self) -> list[str]:
         """List of required fields not yet collected."""
-        config = self._get_active_config()
+        config = self.get_active_config()
         return [
             f for f, cfg in config.items()
             if cfg["required"] and f not in self.collected_fields
@@ -228,7 +228,7 @@ class VoiceSession:
         if not missing:
             return None
 
-        config = self._get_active_config()
+        config = self.get_active_config()
         # Sort by order and return first
         sorted_missing = sorted(
             missing,
@@ -288,13 +288,29 @@ class SessionStore(Protocol):
 
 class InMemorySessionStore:
     """
-    In-memory session storage for development/testing.
-    
-    For production deployments, consider implementing a persistent
-    session store (e.g., database-backed) for horizontal scaling.
+    In-memory session storage.
+
+    Suitable for single-worker deployments only.
+
+    WARNING: With multiple uvicorn workers (WEB_CONCURRENCY > 1) each worker
+    process has its own independent in-memory store. A session created by
+    worker-A is NOT visible to worker-B, causing ``SessionNotFoundError`` in
+    round-robin load-balanced environments.
+
+    For multi-worker production, replace with a Redis-backed or
+    database-backed ``SessionStore`` implementation that is shared across
+    all worker processes.
     """
 
     def __init__(self) -> None:
+        import os as _os
+        _workers = int(_os.environ.get("WEB_CONCURRENCY", "1"))
+        if _workers > 1:
+            logger.warning(
+                "InMemorySessionStore: WEB_CONCURRENCY=%d — voice sessions are "
+                "NOT shared across workers. Use a Redis-backed store in production.",
+                _workers,
+            )
         self._sessions: dict[str, VoiceSession] = {}
 
     async def get(self, session_id: str) -> VoiceSession | None:
@@ -319,7 +335,7 @@ class InMemorySessionStore:
             del self._sessions[sid]
 
         if expired:
-            logger.info(f"Cleaned up {len(expired)} expired voice sessions")
+            logger.info("Cleaned up %d expired voice sessions", len(expired))
 
         return len(expired)
 
@@ -442,17 +458,29 @@ class VoiceOnboardingService:
         Returns:
             Tuple of (session, greeting_text)
         """
-        # Create new session
+        # Create new session via the immutable factory method
         session = VoiceSession.create(language=language)
 
-        if context:
-            session.metadata["context"] = context
+        # Apply context and initial data immutably via with_update() — never
+        # mutate the dataclass fields in-place, as that breaks the functional
+        # state-machine contract documented in VoiceSession's docstring.
+        if context or initial_data:
+            new_meta = {**session.metadata}
+            if context:
+                new_meta["context"] = context
 
-        # Populate initial collected data
-        if initial_data:
-            session.collected_data.update(initial_data)
-            # Update current field to skip collected ones
-            session.current_field = session.next_field
+            new_data = dict(session.collected_data)
+            if initial_data:
+                new_data.update(initial_data)
+
+            # Derive next_field from a temporary view of the updated state
+            temp = session.with_update(collected_data=new_data, metadata=new_meta)
+
+            session = session.with_update(
+                collected_data=new_data,
+                metadata=new_meta,
+                current_field=temp.next_field,
+            )
 
         # Get greeting from prompts
         greeting = self.prompts.get("voice_onboarding.greeting")
@@ -474,7 +502,7 @@ class VoiceOnboardingService:
         # Save session
         await self.store.save(session)
 
-        logger.info(f"Started voice session: {session.session_id} with context keys: {list((context or {}).keys())}")
+        logger.info("Started voice session: %s with context keys: %s", session.session_id, list((context or {}).keys()))
 
         return session, greeting
 
@@ -526,7 +554,7 @@ class VoiceOnboardingService:
             new_confidence = session.field_confidence.copy()
 
             # Get active config for validation
-            active_config = session._get_active_config()
+            active_config = session.get_active_config()
 
             # Apply extractions
             for field_name, value in ai_result.extracted_fields.items():
@@ -535,14 +563,14 @@ class VoiceOnboardingService:
                     if active_config[field_name]["validator"](value):
                         new_data[field_name] = self._normalize_value(field_name, value)
                         new_confidence[field_name] = ai_result.confidence.get(field_name, 0.8)
-                        logger.debug(f"Extracted {field_name}: {value}")
+                        logger.debug("Extracted %s: %s", field_name, value)
 
             # Apply corrections
             for field_name, value in ai_result.corrections.items():
                 if field_name in active_config and value is not None:
                     new_data[field_name] = self._normalize_value(field_name, value)
                     new_confidence[field_name] = ai_result.confidence.get(field_name, 0.9)
-                    logger.debug(f"Corrected {field_name}: {value}")
+                    logger.debug("Corrected %s: %s", field_name, value)
 
             # Add AI response to history
             ai_turn = ConversationTurn(
@@ -583,7 +611,7 @@ class VoiceOnboardingService:
             return session, ai_result.response_text
 
         except (AIServiceError, ExtractionError) as e:
-            logger.error(f"AI error in session {session_id}: {e}")
+            logger.error("AI error in session %s: %s", session_id, e)
 
             # Generate fallback response
             fallback = self.prompts.get(
@@ -642,7 +670,7 @@ class VoiceOnboardingService:
         # Transform to doctor creation format
         doctor_data = self._transform_to_doctor_data(session)
 
-        logger.info(f"Finalized voice session: {session_id}")
+        logger.info("Finalized voice session: %s", session_id)
 
         return doctor_data
 
@@ -651,7 +679,7 @@ class VoiceOnboardingService:
         session = await self._get_session(session_id)
         session = session.with_update(status=SessionStatus.CANCELLED)
         await self.store.delete(session_id)
-        logger.info(f"Cancelled voice session: {session_id}")
+        logger.info("Cancelled voice session: %s", session_id)
 
     def _build_mediator_prompt(self, session: VoiceSession, user_message: str) -> str:
         """Build the AI mediator prompt with current context."""

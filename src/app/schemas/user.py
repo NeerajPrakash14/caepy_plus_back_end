@@ -11,6 +11,19 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..models.enums import UserRole
 
+
+def _validate_user_role(v: str) -> str:
+    """Validate that *v* is an allowed UserRole value.
+
+    Centralised so every schema that validates a role field delegates here
+    instead of duplicating the check.
+    """
+    allowed = [r.value for r in UserRole]
+    if v not in allowed:
+        raise ValueError(f"Role must be one of: {', '.join(allowed)}")
+    return v
+
+
 # =============================================================================
 # REQUEST SCHEMAS
 # =============================================================================
@@ -46,10 +59,7 @@ class UserCreate(BaseModel):
     @classmethod
     def validate_role(cls, v: str) -> str:
         """Validate role is one of the allowed values."""
-        allowed = [r.value for r in UserRole]
-        if v not in allowed:
-            raise ValueError(f"Role must be one of: {', '.join(allowed)}")
-        return v
+        return _validate_user_role(v)
 
     @field_validator("phone")
     @classmethod
@@ -92,9 +102,7 @@ class UserUpdate(BaseModel):
     def validate_role(cls, v: str | None) -> str | None:
         """Validate role if provided."""
         if v is not None:
-            allowed = [r.value for r in UserRole]
-            if v not in allowed:
-                raise ValueError(f"Role must be one of: {', '.join(allowed)}")
+            return _validate_user_role(v)
         return v
 
     @field_validator("doctor_id")
@@ -117,10 +125,7 @@ class UserRoleUpdate(BaseModel):
     @classmethod
     def validate_role(cls, v: str) -> str:
         """Validate role is one of the allowed values."""
-        allowed = [r.value for r in UserRole]
-        if v not in allowed:
-            raise ValueError(f"Role must be one of: {', '.join(allowed)}")
-        return v
+        return _validate_user_role(v)
 
 
 class UserStatusUpdate(BaseModel):

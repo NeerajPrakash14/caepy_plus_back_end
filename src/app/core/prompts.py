@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import logging
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -71,7 +70,7 @@ class PromptManager:
             with open(self.config_path, encoding="utf-8") as f:
                 self._prompts = yaml.safe_load(f)
 
-            logger.info(f"Loaded prompts from {self.config_path}")
+            logger.info("Loaded prompts from %s", self.config_path)
 
         except yaml.YAMLError as e:
             raise ConfigurationError(
@@ -325,7 +324,7 @@ class PromptManager:
             f"## GENERAL RULES\n{base_instruction}"
         )
 
-        logger.debug(f"Generated variant prompt with indices: {variant_indices}")
+        logger.debug("Generated variant prompt with indices: %s", variant_indices)
         return prompt
 
     def _get_variant_data(self, section: str, variant_idx: int) -> dict[str, Any] | None:
@@ -347,11 +346,11 @@ class PromptManager:
 
             # Fallback to first variant if index out of range
             if variants:
-                logger.warning(f"Variant index {variant_idx} out of range for {section}, using 0")
+                logger.warning("Variant index %s out of range for %s, using 0", variant_idx, section)
                 return variants[0]
 
         except KeyError:
-            logger.warning(f"No variants found for section: {section}")
+            logger.warning("No variants found for section: %s", section)
 
         return None
 
@@ -408,11 +407,3 @@ def get_prompt_manager() -> PromptManager:
         _prompt_manager = PromptManager()
     return _prompt_manager
 
-@lru_cache(maxsize=1)
-def get_cached_prompt_manager() -> PromptManager:
-    """
-    Get a cached prompt manager instance.
-    
-    Alternative to singleton for dependency injection testing.
-    """
-    return PromptManager()
