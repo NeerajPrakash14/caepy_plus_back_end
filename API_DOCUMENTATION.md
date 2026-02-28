@@ -2,26 +2,21 @@
 
 **Base URL:** `http://127.0.0.1:8000/api/v1`
 
-**Total Endpoints:** 109
+**Total Endpoints:** 58
 
 ---
 
 ## Table of Contents
 
-1. [Authentication (4 endpoints)](#1-authentication)
+1. [Authentication (5 endpoints)](#1-authentication)
 2. [Health Check (3 endpoints)](#2-health-check)
-3. [Doctors (9 endpoints)](#3-doctors)
-4. [Hospitals (11 endpoints)](#4-hospitals)
-5. [Hospital Affiliations (6 endpoints)](#5-hospital-affiliations)
-6. [Onboarding (14 endpoints)](#6-onboarding)
-7. [Onboarding Admin (16 endpoints)](#7-onboarding-admin)
-8. [Dropdown Data (5 endpoints)](#8-dropdown-data)
-9. [Admin Dropdown Options (11 endpoints)](#9-admin-dropdown-options)
-10. [Admin Users (8 endpoints)](#10-admin-users)
-11. [Testimonials (7 endpoints)](#11-testimonials)
-12. [Blob Storage (3 endpoints)](#12-blob-storage)
-13. [Voice Onboarding (5 endpoints)](#13-voice-onboarding)
-14. [Voice Config (7 endpoints)](#14-voice-config)
+3. [Doctors (7 endpoints)](#3-doctors)
+4. [Dropdowns (3 endpoints)](#4-dropdowns)
+5. [Onboarding (5 endpoints)](#5-onboarding)
+6. [Voice Onboarding (5 endpoints)](#6-voice-onboarding)
+7. [Onboarding Admin (10 endpoints)](#7-onboarding-admin)
+8. [Admin Users (9 endpoints)](#8-admin-users)
+9. [Admin Dropdowns (11 endpoints)](#9-admin-dropdowns)
 
 ---
 
@@ -30,7 +25,7 @@
 ### 1.1 Request OTP
 **POST** `/auth/otp/request`
 
-Send OTP to mobile number for authentication.
+Send OTP to mobile number for authentication. No auth required.
 
 **Request Body:**
 ```json
@@ -40,10 +35,10 @@ Send OTP to mobile number for authentication.
 ```
 
 **cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/auth/otp/request' \
---header 'Content-Type: application/json' \
---data '{"mobile_number": "9443453525"}'
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/auth/otp/request' \
+  -H 'Content-Type: application/json' \
+  -d '{"mobile_number": "9443453525"}'
 ```
 
 **Response (200):**
@@ -58,41 +53,10 @@ curl --location 'http://127.0.0.1:8000/api/v1/auth/otp/request' \
 
 ---
 
-### 1.2 Resend OTP
-**POST** `/auth/otp/resend`
-
-Resend OTP to the same mobile number (invalidates previous OTP).
-
-**Request Body:**
-```json
-{
-  "mobile_number": "9443453525"
-}
-```
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/auth/otp/resend' \
---header 'Content-Type: application/json' \
---data '{"mobile_number": "9443453525"}'
-```
-
-**Response (200):**
-```json
-{
-  "success": true,
-  "message": "OTP resent successfully",
-  "mobile_number": "94****3525",
-  "expires_in_seconds": 300
-}
-```
-
----
-
-### 1.3 Verify OTP
+### 1.2 Verify OTP
 **POST** `/auth/otp/verify`
 
-Verify OTP and get JWT access token.
+Verify OTP and receive a JWT access token. Creates a new doctor record if the mobile number is not registered.
 
 **Request Body:**
 ```json
@@ -103,10 +67,10 @@ Verify OTP and get JWT access token.
 ```
 
 **cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/auth/otp/verify' \
---header 'Content-Type: application/json' \
---data '{"mobile_number": "9443453525", "otp": "123456"}'
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/auth/otp/verify' \
+  -H 'Content-Type: application/json' \
+  -d '{"mobile_number": "9443453525", "otp": "123456"}'
 ```
 
 **Response (200):**
@@ -126,36 +90,103 @@ curl --location 'http://127.0.0.1:8000/api/v1/auth/otp/verify' \
 
 ---
 
-### 1.4 Validate and Login (Dev Only)
-**POST** `/validateandlogin`
+### 1.3 Resend OTP
+**POST** `/auth/otp/resend`
 
-Development endpoint - accepts any OTP and returns JWT token.
+Resend OTP to the same mobile number. Invalidates any previously sent OTP.
 
 **Request Body:**
 ```json
 {
-  "phone_number": "9443453525",
-  "otp": "123456"
+  "mobile_number": "9443453525"
 }
 ```
 
 **cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/validateandlogin' \
---header 'Content-Type: application/json' \
---data '{"phone_number": "9443453525", "otp": "123456"}'
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/auth/otp/resend' \
+  -H 'Content-Type: application/json' \
+  -d '{"mobile_number": "9443453525"}'
 ```
 
 **Response (200):**
 ```json
 {
   "success": true,
-  "message": "Login successful",
-  "data": {
-    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "token_type": "bearer",
-    "expires_in": 1800
-  }
+  "message": "OTP resent successfully",
+  "mobile_number": "94****3525",
+  "expires_in_seconds": 300
+}
+```
+
+---
+
+### 1.4 Admin OTP Verify
+**POST** `/auth/admin/otp/verify`
+
+Verify OTP for admin/operational users. The user must already exist in the `users` table with an `admin` or `operational` role.
+
+**Request Body:**
+```json
+{
+  "mobile_number": "9443453525",
+  "otp": "123456"
+}
+```
+
+**cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/auth/admin/otp/verify' \
+  -H 'Content-Type: application/json' \
+  -d '{"mobile_number": "9443453525", "otp": "123456"}'
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Admin OTP verified successfully",
+  "user_id": 1,
+  "role": "admin",
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer",
+  "expires_in": 1800
+}
+```
+
+---
+
+### 1.5 Google Sign-In Verify
+**POST** `/auth/google/verify`
+
+Authenticate via Google Sign-In by verifying a Firebase ID token. Finds or creates a doctor/user record by the email from the token.
+
+**Request Body:**
+```json
+{
+  "id_token": "eyJhbGciOiJSUz..."
+}
+```
+
+**cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/auth/google/verify' \
+  -H 'Content-Type: application/json' \
+  -d '{"id_token": "eyJhbGciOiJSUz..."}'
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Google sign-in successful",
+  "doctor_id": 12,
+  "is_new_user": true,
+  "email": "doctor@gmail.com",
+  "role": "user",
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer",
+  "expires_in": 1800
 }
 ```
 
@@ -166,11 +197,11 @@ curl --location 'http://127.0.0.1:8000/api/v1/validateandlogin' \
 ### 2.1 Health Check
 **GET** `/health`
 
-Returns comprehensive health status of the service.
+Returns comprehensive health status including database and AI service checks. No auth required.
 
 **cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/health'
+```bash
+curl 'http://127.0.0.1:8000/api/v1/health'
 ```
 
 **Response (200):**
@@ -199,11 +230,11 @@ curl --location 'http://127.0.0.1:8000/api/v1/health'
 ### 2.2 Liveness Probe
 **GET** `/live`
 
-Kubernetes liveness probe endpoint.
+Kubernetes liveness probe. Returns immediately without checking dependencies.
 
 **cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/live'
+```bash
+curl 'http://127.0.0.1:8000/api/v1/live'
 ```
 
 **Response (200):**
@@ -218,11 +249,11 @@ curl --location 'http://127.0.0.1:8000/api/v1/live'
 ### 2.3 Readiness Probe
 **GET** `/ready`
 
-Kubernetes readiness probe endpoint.
+Kubernetes readiness probe. Verifies the database connection is healthy.
 
 **cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/ready'
+```bash
+curl 'http://127.0.0.1:8000/api/v1/ready'
 ```
 
 **Response (200):**
@@ -236,20 +267,25 @@ curl --location 'http://127.0.0.1:8000/api/v1/ready'
 
 ## 3. DOCTORS
 
+All endpoints require JWT authentication. Admin/Operational role required for update and bulk upload operations.
+
 ### 3.1 List Doctors
 **GET** `/doctors`
 
-Get paginated list of all registered doctors.
+Paginated list of registered doctors. When the `status` query parameter is provided, returns full onboarding information (identity, details, media, status history).
 
 **Query Parameters:**
-- `page` (int): Page number (default: 1)
-- `page_size` (int): Items per page (default: 20, max: 100)
-- `specialization` (string): Filter by specialization
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `page` | int | 1 | Page number (1-indexed) |
+| `page_size` | int | 20 | Items per page (max 100) |
+| `specialization` | string | — | Filter by specialization (partial match, only without `status`) |
+| `status` | string | — | Onboarding status filter: `PENDING`, `SUBMITTED`, `VERIFIED`, `REJECTED`. When set, returns full `DoctorWithFullInfoResponse` |
 
 **cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/doctors?page=1&page_size=20' \
---header 'Authorization: Bearer YOUR_TOKEN'
+```bash
+curl 'http://127.0.0.1:8000/api/v1/doctors?page=1&page_size=20' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
 **Response (200):**
@@ -269,49 +305,33 @@ curl --location 'http://127.0.0.1:8000/api/v1/doctors?page=1&page_size=20' \
 
 ---
 
-### 3.2 Create Doctor
-**POST** `/doctors`
+### 3.2 Lookup Doctor (Admin View)
+**GET** `/doctors/lookup`
 
-Register a new doctor.
+Full admin view of a doctor's complete onboarding profile. Looks up by `doctor_id`, `email`, or `phone`. Aggregates data from doctors, identity, details, media, and status history tables.
 
-**Request Body:**
-```json
-{
-  "first_name": "John",
-  "last_name": "Doe",
-  "email": "john.doe@example.com",
-  "phone_number": "9876543210",
-  "primary_specialization": "Cardiology",
-  "medical_registration_number": "MCI12345"
-}
-```
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `doctor_id` | int | Lookup by numeric doctor ID |
+| `email` | string | Lookup by email address |
+| `phone` | string | Lookup by phone number (+91…) |
+
+> At least one parameter is required.
 
 **cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/doctors' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{
-  "first_name": "John",
-  "last_name": "Doe",
-  "email": "john.doe@example.com",
-  "phone_number": "9876543210",
-  "primary_specialization": "Cardiology",
-  "medical_registration_number": "MCI12345"
-}'
+```bash
+curl 'http://127.0.0.1:8000/api/v1/doctors/lookup?doctor_id=7' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
-**Response (201):**
+**Response (200):**
 ```json
 {
-  "success": true,
-  "message": "Doctor created successfully",
-  "data": {
-    "id": 15,
-    "first_name": "John",
-    "last_name": "Doe",
-    ...
-  }
+  "identity": { "doctor_id": 7, "first_name": "John", "last_name": "Doe", ... },
+  "details": { "bio": "...", "qualifications": [...], ... },
+  "media": [ { "media_id": "uuid", "media_type": "image", ... } ],
+  "status_history": [ { "previous_status": "PENDING", "new_status": "SUBMITTED", ... } ]
 }
 ```
 
@@ -320,12 +340,12 @@ curl --location 'http://127.0.0.1:8000/api/v1/doctors' \
 ### 3.3 Get Doctor by ID
 **GET** `/doctors/{doctor_id}`
 
-Get detailed information about a specific doctor.
+Retrieve a single doctor's basic profile.
 
 **cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/doctors/7' \
---header 'Authorization: Bearer YOUR_TOKEN'
+```bash
+curl 'http://127.0.0.1:8000/api/v1/doctors/7' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
 **Response (200):**
@@ -333,7 +353,15 @@ curl --location 'http://127.0.0.1:8000/api/v1/doctors/7' \
 {
   "success": true,
   "message": "Doctor retrieved successfully",
-  "data": {...}
+  "data": {
+    "id": 7,
+    "first_name": "John",
+    "last_name": "Doe",
+    "email": "john.doe@example.com",
+    "phone": "+919443453525",
+    "primary_specialization": "Cardiology",
+    ...
+  }
 }
 ```
 
@@ -342,21 +370,22 @@ curl --location 'http://127.0.0.1:8000/api/v1/doctors/7' \
 ### 3.4 Update Doctor
 **PUT** `/doctors/{doctor_id}`
 
-Update an existing doctor's information.
+Update an existing doctor's profile. Only provided fields are changed (partial update). Requires **Admin or Operational** role.
 
 **Request Body:**
 ```json
 {
-  "first_name": "Updated Name"
+  "first_name": "Updated Name",
+  "primary_specialization": "Neurology"
 }
 ```
 
 **cURL:**
-```
-curl --location --request PUT 'http://127.0.0.1:8000/api/v1/doctors/7' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"first_name": "Updated Name"}'
+```bash
+curl -X PUT 'http://127.0.0.1:8000/api/v1/doctors/7' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"first_name": "Updated Name"}'
 ```
 
 **Response (200):**
@@ -364,1347 +393,962 @@ curl --location --request PUT 'http://127.0.0.1:8000/api/v1/doctors/7' \
 {
   "success": true,
   "message": "Doctor updated successfully",
-  "data": {...}
+  "data": { ... }
 }
 ```
 
 ---
 
-### 3.5 Delete Doctor
-**DELETE** `/doctors/{doctor_id}`
+### 3.5 Download CSV Template
+**GET** `/doctors/bulk-upload/csv/template`
 
-Soft delete a doctor.
+Download the official CSV template with sample rows and all supported column headers. Requires **Admin or Operational** role.
 
 **cURL:**
-```
-curl --location --request DELETE 'http://127.0.0.1:8000/api/v1/doctors/7' \
---header 'Authorization: Bearer YOUR_TOKEN'
+```bash
+curl -O 'http://127.0.0.1:8000/api/v1/doctors/bulk-upload/csv/template' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
-**Response (204):** No content
+**Response (200):** CSV file download (`doctor_bulk_upload_template.csv`)
 
 ---
 
-### 3.6 Get Doctor by Email
-**GET** `/doctors/email/{email}`
+### 3.6 Validate CSV (Dry Run)
+**POST** `/doctors/bulk-upload/csv/validate`
 
-Look up a doctor by email address.
+Validate a CSV file without writing anything to the database. Returns row-level errors so the operator can fix them before confirming. Requires **Admin or Operational** role.
+
+**Required CSV columns:** `first_name`, `last_name`, `phone`
+
+**Max rows:** 500
+
+**Request:** Multipart file upload (field name: `file`)
 
 **cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/doctors/bulk-upload/csv/validate' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -F 'file=@doctors.csv'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/doctors/email/test@example.com' \
---header 'Authorization: Bearer YOUR_TOKEN'
+
+**Response (200):**
+```json
+{
+  "valid": true,
+  "total_rows": 25,
+  "error_count": 0,
+  "errors": []
+}
+```
+
+**Response (200) — with errors:**
+```json
+{
+  "valid": false,
+  "total_rows": 25,
+  "error_count": 2,
+  "errors": [
+    { "row": 3, "field": "phone", "error": "Phone number is required." },
+    { "row": 7, "field": "email", "error": "'bad-email' is not a valid email address." }
+  ]
+}
+```
+
+---
+
+### 3.7 Confirm CSV Upload
+**POST** `/doctors/bulk-upload/csv`
+
+Confirm a previously validated CSV upload and write records to the database. Runs validation again before writing — returns `422` if any row fails. Requires **Admin or Operational** role.
+
+**Behaviour:**
+- **New doctors** (by phone) → created with `onboarding_status = PENDING` + audit entry
+- **Existing doctors** (by phone) → profile fields updated; onboarding status unchanged
+- Each row uses a savepoint; a DB error on one row does not affect others
+
+**Request:** Multipart file upload (field name: `file`)
+
+**cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/doctors/bulk-upload/csv' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -F 'file=@doctors.csv'
 ```
 
 **Response (200):**
 ```json
 {
   "success": true,
-  "message": "Doctor retrieved successfully",
-  "data": {...}
+  "message": "Processed 25 row(s): 20 created, 5 updated.",
+  "total_rows": 25,
+  "created": 20,
+  "updated": 5,
+  "skipped": 0,
+  "rows": [
+    { "row": 2, "status": "created", "doctor_id": 101, "phone": "+919443453525", "email": "dr@example.com" },
+    { "row": 3, "status": "updated", "doctor_id": 7, "phone": "+919876543210", "email": null }
+  ],
+  "skipped_errors": []
 }
 ```
 
 ---
 
-### 3.7 Get Doctor by Phone
-**GET** `/doctors/phone/{phone_number}`
+## 4. DROPDOWNS
 
-Look up a doctor by phone number.
+Public and authenticated endpoints for managing dropdown options (specialties, qualifications, etc.).
+
+### 4.1 Get All Dropdown Options
+**GET** `/dropdowns`
+
+Return every supported dropdown field with its approved options. **No authentication required.**
 
 **cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/doctors/phone/9443453525' \
---header 'Authorization: Bearer YOUR_TOKEN'
+```bash
+curl 'http://127.0.0.1:8000/api/v1/dropdowns'
 ```
 
 **Response (200):**
 ```json
 {
   "success": true,
-  "message": "Doctor retrieved successfully",
-  "data": {...}
-}
-```
-
----
-
-### 3.8 Hard Delete Doctor (Erase)
-**DELETE** `/doctors/{doctor_id}/erase`
-
-Permanently delete doctor and all related records.
-
-**cURL:**
-```
-curl --location --request DELETE 'http://127.0.0.1:8000/api/v1/doctors/7/erase' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
-**Response (204):** No content
-
----
-
-### 3.9 Erase All Records (Dev Only)
-**DELETE** `/doctors/erase-all`
-
-⚠️ DANGEROUS: Delete all records from all tables. Only available in development.
-
-**cURL:**
-```
-curl --location --request DELETE 'http://127.0.0.1:8000/api/v1/doctors/erase-all' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
-**Response (204):** No content
-
----
-
-## 4. HOSPITALS
-
-### 4.1 List Hospitals
-**GET** `/hospitals`
-
-Get list of hospitals with optional filters.
-
-**Query Parameters:**
-- `skip` (int): Skip N records (default: 0)
-- `limit` (int): Max records (default: 50, max: 100)
-- `verification_status` (string): Filter by status
-- `city` (string): Filter by city
-- `state` (string): Filter by state
-- `include_inactive` (bool): Include inactive hospitals
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/hospitals?limit=50' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 4.2 Create Hospital
-**POST** `/hospitals`
-
-Add a new hospital.
-
-**Request Body:**
-```json
-{
-  "name": "City Hospital",
-  "city": "Mumbai",
-  "address": "123 Main St",
-  "state": "Maharashtra",
-  "pincode": "400001"
-}
-```
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/hospitals' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{
-  "name": "City Hospital",
-  "city": "Mumbai",
-  "address": "123 Main St",
-  "state": "Maharashtra",
-  "pincode": "400001"
-}'
-```
-
-**Response (201):**
-```json
-{
-  "success": true,
-  "message": "Hospital created successfully",
-  "data": {...}
-}
-```
-
----
-
-### 4.3 Get Hospital by ID
-**GET** `/hospitals/{hospital_id}`
-
-Get hospital details.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/hospitals/1' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 4.4 Update Hospital
-**PATCH** `/hospitals/{hospital_id}`
-
-Update hospital details.
-
-**Request Body:**
-```json
-{
-  "name": "Updated Hospital Name"
-}
-```
-
-**cURL:**
-```
-curl --location --request PATCH 'http://127.0.0.1:8000/api/v1/hospitals/1' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"name": "Updated Hospital Name"}'
-```
-
----
-
-### 4.5 Delete Hospital
-**DELETE** `/hospitals/{hospital_id}`
-
-Soft delete a hospital.
-
-**cURL:**
-```
-curl --location --request DELETE 'http://127.0.0.1:8000/api/v1/hospitals/1' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 4.6 Search Hospitals
-**GET** `/hospitals/search`
-
-Search hospitals for autocomplete.
-
-**Query Parameters:**
-- `q` (string, required): Search query
-- `city` (string): Filter by city
-- `state` (string): Filter by state
-- `limit` (int): Max results (default: 20)
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/hospitals/search?q=City' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 4.7 Verify Hospital (Admin)
-**POST** `/hospitals/{hospital_id}/verify`
-
-Verify or reject a hospital.
-
-**Request Body:**
-```json
-{
-  "action": "verify",
-  "verified_by": "admin@example.com"
-}
-```
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/hospitals/1/verify' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"action": "verify", "verified_by": "admin@example.com"}'
-```
-
----
-
-### 4.8 List Pending Hospitals (Admin)
-**GET** `/hospitals/admin/pending`
-
-List hospitals pending verification.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/hospitals/admin/pending' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 4.9 Get Hospital Stats (Admin)
-**GET** `/hospitals/admin/stats`
-
-Get hospital statistics.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/hospitals/admin/stats' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 4.10 Merge Hospitals (Admin)
-**POST** `/hospitals/admin/merge`
-
-Merge duplicate hospitals.
-
-**Request Body:**
-```json
-{
-  "source_hospital_ids": [2, 3],
-  "target_hospital_id": 1
-}
-```
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/hospitals/admin/merge' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"source_hospital_ids": [2, 3], "target_hospital_id": 1}'
-```
-
----
-
-## 5. HOSPITAL AFFILIATIONS
-
-### 5.1 Create Affiliation
-**POST** `/hospitals/affiliations`
-
-Create doctor-hospital affiliation.
-
-**Query Parameters:**
-- `doctor_id` (int, required): Doctor ID
-
-**Request Body:**
-```json
-{
-  "hospital_id": 1,
-  "designation": "Senior Consultant",
-  "department": "Cardiology",
-  "is_primary": true
-}
-```
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/hospitals/affiliations?doctor_id=7' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"hospital_id": 1, "designation": "Senior Consultant", "is_primary": true}'
-```
-
----
-
-### 5.2 Create Affiliation with New Hospital
-**POST** `/hospitals/affiliations/with-new-hospital`
-
-Create a new hospital and affiliate doctor.
-
-**Query Parameters:**
-- `doctor_id` (int, required): Doctor ID
-
-**Request Body:**
-```json
-{
-  "hospital_name": "New Hospital",
-  "hospital_city": "Delhi",
-  "hospital_address": "456 Test St",
-  "hospital_state": "Delhi",
-  "hospital_pincode": "110001",
-  "designation": "Consultant"
-}
-```
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/hospitals/affiliations/with-new-hospital?doctor_id=7' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{
-  "hospital_name": "New Hospital",
-  "hospital_city": "Delhi",
-  "hospital_address": "456 Test St",
-  "hospital_state": "Delhi",
-  "hospital_pincode": "110001"
-}'
-```
-
----
-
-### 5.3 Get Doctor Affiliations
-**GET** `/hospitals/affiliations/doctor/{doctor_id}`
-
-Get all hospital affiliations for a doctor.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/hospitals/affiliations/doctor/7' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 5.4 Get Hospital Doctors
-**GET** `/hospitals/affiliations/hospital/{hospital_id}`
-
-Get all doctors affiliated with a hospital.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/hospitals/affiliations/hospital/1' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 5.5 Update Affiliation
-**PATCH** `/hospitals/affiliations/{affiliation_id}`
-
-Update affiliation details.
-
-**Request Body:**
-```json
-{
-  "is_primary": true
-}
-```
-
-**cURL:**
-```
-curl --location --request PATCH 'http://127.0.0.1:8000/api/v1/hospitals/affiliations/AFFILIATION_ID' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"is_primary": true}'
-```
-
----
-
-### 5.6 Delete Affiliation
-**DELETE** `/hospitals/affiliations/{affiliation_id}`
-
-Remove a doctor-hospital affiliation.
-
-**cURL:**
-```
-curl --location --request DELETE 'http://127.0.0.1:8000/api/v1/hospitals/affiliations/AFFILIATION_ID' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-## 6. ONBOARDING
-
-### 6.1 Create Profile
-**POST** `/onboarding/createprofile`
-
-Create a new onboarding profile.
-
-**Request Body:**
-```json
-{
-  "first_name": "John",
-  "last_name": "Doe",
-  "email": "john.doe@example.com",
-  "phone_number": "9876543210"
-}
-```
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding/createprofile' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{
-  "first_name": "John",
-  "last_name": "Doe",
-  "email": "john.doe@example.com",
-  "phone_number": "9876543210"
-}'
-```
-
-**Response (201):**
-```json
-{
-  "success": true,
-  "message": "Profile created successfully",
+  "message": "Dropdown options loaded successfully",
   "data": {
-    "doctor_id": 15
+    "fields": {
+      "specialty": {
+        "field_name": "specialty",
+        "description": "Medical specialty",
+        "options": [
+          { "id": 1, "value": "Cardiology", "label": "Cardiology", "display_order": 0 },
+          { "id": 2, "value": "Neurology", "label": "Neurology", "display_order": 1 }
+        ]
+      },
+      "qualifications": { ... },
+      "languages_spoken": { ... }
+    },
+    "supported_fields": ["age_groups_treated", "conditions_treated", "fellowships", ...]
+  }
+}
+```
+
+**Supported fields:** `specialty`, `sub_specialties`, `qualifications`, `fellowships`, `professional_memberships`, `languages_spoken`, `age_groups_treated`, `primary_practice_location`, `practice_segments`, `training_experience`, `motivation_in_practice`, `unwinding_after_work`, `quality_time_interests`, `conditions_treated`, `procedures_performed`
+
+---
+
+### 4.2 Get Dropdown Options for a Single Field
+**GET** `/dropdowns/{field_name}`
+
+Return approved options for one specific dropdown field. **No authentication required.**
+
+**cURL:**
+```bash
+curl 'http://127.0.0.1:8000/api/v1/dropdowns/specialty'
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Options for 'specialty' loaded successfully",
+  "data": {
+    "field_name": "specialty",
+    "description": "Medical specialty",
+    "options": [
+      { "id": 1, "value": "Cardiology", "label": "Cardiology", "display_order": 0 }
+    ]
   }
 }
 ```
 
 ---
 
-### 6.2 Save Profile
-**POST** `/onboarding/saveprofile/{doctor_id}`
+### 4.3 Submit New Dropdown Option
+**POST** `/dropdowns/submit`
 
-Update profile identity and details.
+Propose a new dropdown value. Stored as `pending` until an admin approves it. Requires **JWT authentication** (any role).
 
 **Request Body:**
 ```json
 {
-  "full_name": "Dr. John Doe",
-  "specialty": "Cardiology",
-  "bio": "Experienced cardiologist...",
-  "years_of_clinical_experience": 15
+  "field_name": "specialty",
+  "value": "Sports Medicine",
+  "label": "Sports Medicine"
 }
 ```
 
 **cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding/saveprofile/7' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"bio": "Updated bio content"}'
-```
-
----
-
-### 6.3 Submit Profile
-**POST** `/onboarding/submit/{doctor_id}`
-
-Submit profile for verification.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding/submit/7' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{}'
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/dropdowns/submit' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"field_name": "specialty", "value": "Sports Medicine"}'
 ```
 
----
-
-### 6.4 Delete Profile
-**POST** `/onboarding/delete/{doctor_id}`
-
-Soft delete a profile.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding/delete/7' \
---header 'Authorization: Bearer YOUR_TOKEN'
+**Response (202):**
+```json
+{
+  "success": true,
+  "message": "'Sports Medicine' has been submitted for 'specialty' and is pending admin review.",
+  "data": {
+    "id": 42,
+    "field_name": "specialty",
+    "value": "Sports Medicine",
+    "label": "Sports Medicine",
+    "status": "pending",
+    "message": "..."
+  }
+}
 ```
 
 ---
 
-### 6.5 Extract Resume
+## 5. ONBOARDING
+
+Endpoints for resume extraction and doctor profile verification workflow.
+
+### 5.1 Extract Resume
 **POST** `/onboarding/extract-resume`
 
-Upload resume and extract structured data using AI.
+Upload a doctor's resume (PDF or Image) and extract structured professional data using AI. **No authentication required.**
 
-**Form Data:**
-- `file`: Resume file (PDF, PNG, JPG, JPEG)
+**Supported formats:** PDF, PNG, JPG, JPEG | **Max file size:** 10MB
+
+**Request:** Multipart file upload (field name: `file`)
 
 **cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/onboarding/extract-resume' \
+  -F 'file=@resume.pdf'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding/extract-resume' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---form 'file=@"/path/to/resume.pdf"'
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Resume parsed successfully",
+  "data": {
+    "first_name": "Sarah",
+    "last_name": "Johnson",
+    "email": "sarah@hospital.com",
+    "primary_specialization": "Cardiology",
+    "qualifications": [...],
+    "expertise": [...],
+    ...
+  },
+  "processing_time_ms": 3250.15
+}
 ```
 
 ---
 
-### 6.6 Generate Profile Content
-**POST** `/onboarding/generate-profile-content`
+### 5.2 Submit Profile for Verification
+**POST** `/onboarding/submit/{doctor_id}`
 
-Generate professional overview using AI.
+Submit a doctor's profile for admin review. Requires **JWT authentication**. Regular users can only submit their own profile; admin/operational users can submit on behalf of any doctor.
 
-**Request Body:**
+**cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/onboarding/submit/7' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
+```
+
+**Response (200):**
 ```json
 {
-  "doctor_identifier": "7",
-  "personal_details": {
-    "first_name": "John",
-    "last_name": "Doe"
-  },
-  "professional_information": {
-    "primary_specialization": "Cardiology"
+  "success": true,
+  "message": "Profile submitted successfully",
+  "data": {
+    "doctor_id": 7,
+    "previous_status": "PENDING",
+    "new_status": "SUBMITTED"
   }
 }
 ```
 
+---
+
+### 5.3 Get Email Template
+**GET** `/onboarding/email-template/{doctor_id}`
+
+Fetch pre-rendered email subject and body for the admin verification/rejection popup. Requires **Admin or Operational** role.
+
+**Query Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | string | Yes | `verified` or `rejected` |
+
 **cURL:**
+```bash
+curl 'http://127.0.0.1:8000/api/v1/onboarding/email-template/7?action=verified' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding/generate-profile-content' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"doctor_identifier": "7"}'
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Email template loaded successfully",
+  "data": {
+    "action": "verified",
+    "doctor_id": 7,
+    "doctor_email": "john.doe@example.com",
+    "subject": "Your Profile Has Been Verified",
+    "body_html": "<h1>Congratulations, Dr. Doe!</h1>..."
+  }
+}
 ```
 
 ---
 
-### 6.7 Get Profile Session Stats
-**GET** `/onboarding/profile-session/{doctor_identifier}`
+### 5.4 Verify Doctor Profile
+**POST** `/onboarding/verify/{doctor_id}`
 
-Get profile generation session statistics.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding/profile-session/7' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 6.8 Clear Profile Session
-**DELETE** `/onboarding/profile-session/{doctor_identifier}`
-
-Reset variant tracking for a doctor.
-
-**cURL:**
-```
-curl --location --request DELETE 'http://127.0.0.1:8000/api/v1/onboarding/profile-session/7' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 6.9 List Profile Variants
-**GET** `/onboarding/profile-variants`
-
-Get available prompt variants for profile generation.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding/profile-variants' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 6.10 Upload Files
-**POST** `/onboarding/uploads/{doctor_id}`
-
-Register uploaded files for a profile.
+Mark a doctor's profile as verified. Optionally send a notification email. Requires **Admin or Operational** role.
 
 **Request Body:**
 ```json
 {
-  "uploads": [
-    {
-      "field_name": "profile_photo",
-      "file_name": "photo.jpg",
-      "file": "https://example.com/photo.jpg"
-    }
-  ]
+  "send_email": true,
+  "email_subject": "Your Profile Has Been Verified",
+  "email_body": "<h1>Congratulations!</h1>..."
 }
 ```
 
 **cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding/uploads/7' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{
-  "uploads": [
-    {"field_name": "profile_photo", "file_name": "photo.jpg", "file": "https://example.com/photo.jpg"}
-  ]
-}'
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/onboarding/verify/7' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"send_email": true}'
 ```
 
----
-
-### 6.11 Validate Data
-**POST** `/onboarding/validate-data`
-
-Validate extracted data before submission.
-
-**Request Body:** (ResumeExtractedData schema)
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding/validate-data' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"personal_details": {"first_name": "John"}}'
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Profile verified successfully",
+  "data": {
+    "doctor_id": 7,
+    "previous_status": "SUBMITTED",
+    "new_status": "VERIFIED",
+    "verified_at": "2026-02-28T17:30:00Z",
+    "email_sent": true
+  }
+}
 ```
 
 ---
 
-### 6.12 Sync to LinQMD
-**POST** `/onboarding/sync-to-linqmd/{doctor_id}`
+### 5.5 Reject Doctor Profile
+**POST** `/onboarding/reject/{doctor_id}`
 
-Sync doctor profile to LinQMD platform.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding/sync-to-linqmd/7' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 6.13 Bulk Sync to LinQMD
-**POST** `/onboarding/sync-to-linqmd-bulk`
-
-Sync multiple doctors to LinQMD.
+Mark a doctor's profile as rejected. Optionally provide a reason and send a notification email. Requires **Admin or Operational** role.
 
 **Request Body:**
 ```json
 {
-  "doctor_ids": [7, 8, 9]
+  "reason": "Missing medical registration documentation",
+  "send_email": true,
+  "email_subject": "Profile Update Required",
+  "email_body": "<h1>Action Required</h1>..."
 }
 ```
 
 **cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/onboarding/reject/7' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"reason": "Missing documentation", "send_email": true}'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding/sync-to-linqmd-bulk' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"doctor_ids": [7, 8, 9]}'
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Profile rejected successfully",
+  "data": {
+    "doctor_id": 7,
+    "previous_status": "SUBMITTED",
+    "new_status": "REJECTED",
+    "reason": "Missing documentation",
+    "email_sent": true
+  }
+}
 ```
 
 ---
 
-### 6.14 Get LinQMD Sync Status
-**GET** `/onboarding/linqmd-sync-status`
+## 6. VOICE ONBOARDING
 
-Check LinQMD sync configuration status.
+Conversational AI-powered voice registration. All endpoints require JWT authentication.
+
+### 6.1 Start Session
+**POST** `/voice/start`
+
+Start a new voice-based onboarding session. Returns a greeting and session ID.
+
+**Supported Languages:** `en` (English), `es` (Spanish), `hi` (Hindi)
+
+**Session Expiry:** 30 minutes of inactivity.
+
+**Request Body:**
+```json
+{
+  "language": "en",
+  "context": null
+}
+```
 
 **cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/voice/start' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"language": "en"}'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding/linqmd-sync-status' \
---header 'Authorization: Bearer YOUR_TOKEN'
+
+**Response (201):**
+```json
+{
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "active",
+  "greeting": "Hello! I'm here to help you complete your doctor registration. Let's start with your full name.",
+  "fields_total": 8,
+  "created_at": "2026-02-28T17:30:00Z"
+}
 ```
+
+---
+
+### 6.2 Send Chat Message
+**POST** `/voice/chat`
+
+Send a user's speech transcript and receive an AI response with extracted data.
+
+**Request Body:**
+```json
+{
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "user_transcript": "My name is Dr. Sarah Johnson and I specialize in Cardiology",
+  "context": null
+}
+```
+
+**cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/voice/chat' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"session_id": "550e8400-...", "user_transcript": "My name is Dr. Sarah Johnson"}'
+```
+
+**Response (200):**
+```json
+{
+  "session_id": "550e8400-...",
+  "status": "active",
+  "ai_response": "Nice to meet you, Dr. Johnson! I see you specialize in Cardiology. What's your medical registration number?",
+  "fields_collected": 2,
+  "fields_total": 8,
+  "fields_status": [
+    { "field_name": "name", "display_name": "Full Name", "is_collected": true, "value": "Dr. Sarah Johnson", "confidence": 0.95 },
+    { "field_name": "specialization", "display_name": "Specialization", "is_collected": true, "value": "Cardiology", "confidence": 0.92 }
+  ],
+  "current_data": { "name": "Dr. Sarah Johnson", "specialization": "Cardiology" },
+  "is_complete": false,
+  "turn_number": 2
+}
+```
+
+---
+
+### 6.3 Get Session Status
+**GET** `/voice/session/{session_id}`
+
+Retrieve the current status of a voice onboarding session.
+
+**cURL:**
+```bash
+curl 'http://127.0.0.1:8000/api/v1/voice/session/550e8400-...' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
+```
+
+**Response (200):**
+```json
+{
+  "session_id": "550e8400-...",
+  "status": "active",
+  "language": "en",
+  "fields_collected": 2,
+  "fields_total": 8,
+  "fields_status": [...],
+  "current_data": { ... },
+  "is_complete": false,
+  "turn_count": 2,
+  "created_at": "2026-02-28T17:30:00Z",
+  "updated_at": "2026-02-28T17:32:00Z",
+  "expires_at": "2026-02-28T18:02:00Z"
+}
+```
+
+---
+
+### 6.4 Finalize Session
+**POST** `/voice/session/{session_id}/finalize`
+
+Finalize a completed session and retrieve the doctor data with confidence scores. Session must have `is_complete: true`.
+
+**cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/voice/session/550e8400-.../finalize' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
+```
+
+**Response (200):**
+```json
+{
+  "session_id": "550e8400-...",
+  "success": true,
+  "message": "Session finalized",
+  "doctor_data": {
+    "name": "Dr. Sarah Johnson",
+    "specialization": "Cardiology",
+    "medical_registration_number": "MED123456",
+    "email": "sarah.johnson@hospital.com"
+  },
+  "confidence_scores": {
+    "name": 0.95,
+    "specialization": 0.92,
+    "medical_registration_number": 0.98,
+    "email": 0.99
+  }
+}
+```
+
+---
+
+### 6.5 Cancel Session
+**DELETE** `/voice/session/{session_id}`
+
+Cancel and delete a voice onboarding session. This is irreversible.
+
+**cURL:**
+```bash
+curl -X DELETE 'http://127.0.0.1:8000/api/v1/voice/session/550e8400-...' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
+```
+
+**Response (204):** No content
 
 ---
 
 ## 7. ONBOARDING ADMIN
 
-### 7.1 List Doctors with Full Info
-**GET** `/onboarding-admin/doctors/full`
+Admin CRUD endpoints for managing doctor onboarding data. All endpoints require **Admin or Operational** role.
 
-Get all doctors with complete onboarding data.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding-admin/doctors/full' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 7.2 List Doctors with Filter
-**GET** `/onboarding-admin/doctors`
-
-List doctors with optional status filter and pagination.
-
-**Query Parameters:**
-- `status` (string): Filter by status (PENDING, SUBMITTED, VERIFIED, REJECTED)
-- `page` (int): Page number (default: 1)
-- `page_size` (int): Items per page (default: 20)
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding-admin/doctors?status=pending&page=1' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 7.3 Get Doctor Full Info by ID
-**GET** `/onboarding-admin/doctors/{doctor_id}/full`
-
-Get complete onboarding data for a doctor.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding-admin/doctors/7/full' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 7.4 Get Doctor by Email
-**POST** `/onboarding-admin/doctors/by-email/full`
-
-Get doctor by email address.
-
-**Request Body:**
-```json
-{
-  "email": "john.doe@example.com"
-}
-```
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding-admin/doctors/by-email/full' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"email": "john.doe@example.com"}'
-```
-
----
-
-### 7.5 Get Doctor by Phone
-**POST** `/onboarding-admin/doctors/by-phone/full`
-
-Get doctor by phone number.
-
-**Request Body:**
-```json
-{
-  "phone_number": "9443453525"
-}
-```
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding-admin/doctors/by-phone/full' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"phone_number": "9443453525"}'
-```
-
----
-
-### 7.6 Create Identity
+### 7.1 Create Doctor Identity
 **POST** `/onboarding-admin/identities`
 
-Create a new doctor identity.
+Create a new `doctor_identity` record.
 
 **Request Body:**
 ```json
 {
+  "doctor_id": 7,
   "first_name": "John",
   "last_name": "Doe",
-  "email": "john@example.com",
-  "phone_number": "9876543210"
+  "email": "john.doe@example.com",
+  "phone_number": "+919443453525"
 }
 ```
 
 **cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/onboarding-admin/identities' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"doctor_id": 7, "first_name": "John", "last_name": "Doe", "email": "john@example.com"}'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding-admin/identities' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"first_name": "John", "last_name": "Doe", "email": "john@example.com", "phone_number": "9876543210"}'
-```
+
+**Response (201):** `DoctorIdentityResponse` object
 
 ---
 
-### 7.7 Get Identity by Doctor ID
-**GET** `/onboarding-admin/identities/{doctor_id}`
+### 7.2 Get Doctor Identity
+**GET** `/onboarding-admin/identities`
 
-Get identity by doctor ID.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding-admin/identities/7' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 7.8 Get Identity by Email
-**GET** `/onboarding-admin/identities/by-email`
-
-Get identity by email.
+Fetch a doctor identity by `doctor_id` or `email`.
 
 **Query Parameters:**
-- `email` (string): Email address
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `doctor_id` | int | Lookup by doctor ID |
+| `email` | string | Lookup by email |
 
 **cURL:**
+```bash
+curl 'http://127.0.0.1:8000/api/v1/onboarding-admin/identities?doctor_id=7' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding-admin/identities/by-email?email=john@example.com' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
+
+**Response (200):** `DoctorIdentityResponse` object
 
 ---
 
-### 7.9 Upsert Details
+### 7.3 Upsert Doctor Details
 **PUT** `/onboarding-admin/details/{doctor_id}`
 
-Create or update doctor details.
+Create or update the `doctor_details` row for a doctor.
 
 **Request Body:**
 ```json
 {
-  "bio": "Updated bio",
-  "speciality": "Cardiology"
+  "bio": "Experienced cardiologist...",
+  "qualifications": ["MD", "DM Cardiology"],
+  "years_of_experience": 15
 }
 ```
 
 **cURL:**
+```bash
+curl -X PUT 'http://127.0.0.1:8000/api/v1/onboarding-admin/details/7' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"bio": "Experienced cardiologist..."}'
 ```
-curl --location --request PUT 'http://127.0.0.1:8000/api/v1/onboarding-admin/details/7' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"bio": "Updated bio"}'
-```
+
+**Response (200):** `DoctorDetailsResponse` object
 
 ---
 
-### 7.10 Get Details
+### 7.4 Get Doctor Details
 **GET** `/onboarding-admin/details/{doctor_id}`
 
-Get doctor details.
+Fetch doctor details for a given doctor ID.
 
 **cURL:**
+```bash
+curl 'http://127.0.0.1:8000/api/v1/onboarding-admin/details/7' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding-admin/details/7' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
+
+**Response (200):** `DoctorDetailsResponse` object
 
 ---
 
-### 7.11 Add Media
+### 7.5 Add Media Record
 **POST** `/onboarding-admin/media/{doctor_id}`
 
-Add media record for a doctor.
+Insert a `doctor_media` metadata row and return the absolute file URI.
 
 **Request Body:**
 ```json
 {
   "media_type": "image",
   "media_category": "profile_photo",
-  "file_uri": "https://example.com/photo.jpg"
+  "file_uri": "/api/v1/blobs/7/profile_photo/abc.jpg",
+  "file_name": "photo.jpg",
+  "file_size": 204800,
+  "mime_type": "image/jpeg"
 }
 ```
 
 **cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/onboarding-admin/media/7' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"media_type": "image", "media_category": "profile_photo", "file_uri": "...", "file_name": "photo.jpg"}'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding-admin/media/7' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"media_type": "image", "media_category": "profile_photo", "file_uri": "https://example.com/photo.jpg"}'
-```
+
+**Response (201):** `DoctorMediaResponse` object
 
 ---
 
-### 7.12 List Media
+### 7.6 List Doctor Media
 **GET** `/onboarding-admin/media/{doctor_id}`
 
-Get all media for a doctor.
+List all media records for a doctor with absolute URIs.
 
 **cURL:**
+```bash
+curl 'http://127.0.0.1:8000/api/v1/onboarding-admin/media/7' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding-admin/media/7' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
+
+**Response (200):** Array of `DoctorMediaResponse` objects
 
 ---
 
-### 7.13 Upload Media File
-**POST** `/onboarding-admin/media/{doctor_id}/upload`
-
-Upload file directly for a doctor.
-
-**Query Parameters:**
-- `media_category` (string, required): Media category
-
-**Form Data:**
-- `file`: File to upload
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding-admin/media/7/upload?media_category=profile_photo' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---form 'file=@"/path/to/image.jpg"'
-```
-
----
-
-### 7.14 Delete Media
+### 7.7 Delete Media Record
 **DELETE** `/onboarding-admin/media/{media_id}`
 
-Delete a media record.
+Delete a doctor media record by its UUID `media_id`.
 
 **cURL:**
+```bash
+curl -X DELETE 'http://127.0.0.1:8000/api/v1/onboarding-admin/media/abc-uuid-123' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
 ```
-curl --location --request DELETE 'http://127.0.0.1:8000/api/v1/onboarding-admin/media/MEDIA_ID' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
+
+**Response (204):** No content
 
 ---
 
-### 7.15 Get Status History
-**GET** `/onboarding-admin/status-history/{doctor_id}`
+### 7.8 Upload Media File
+**POST** `/onboarding-admin/media/{doctor_id}/upload`
 
-Get status change history for a doctor.
+Upload a file directly to blob storage and register its metadata. Supported: images (JPG, PNG, GIF) and documents (PDF). Max size: 50 MB.
+
+**Query Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `media_category` | string | Yes | Category key: `profile_photo`, `certificate`, `resume`, etc. |
+| `field_name` | string | No | Logical field key for `media_urls` (defaults to `media_category`) |
+
+**Request:** Multipart file upload (field name: `file`)
 
 **cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/onboarding-admin/media/7/upload?media_category=profile_photo' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -F 'file=@photo.jpg'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding-admin/status-history/7' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
+
+**Response (201):** `DoctorMediaResponse` object
 
 ---
 
-### 7.16 Log Status Change
+### 7.9 Log Status History
 **POST** `/onboarding-admin/status-history/{doctor_id}`
 
-Log a status change.
+Append a status-change entry to `doctor_status_history`.
 
 **Request Body:**
 ```json
 {
-  "status": "APPROVED",
-  "notes": "Profile approved after review"
+  "previous_status": "PENDING",
+  "new_status": "SUBMITTED",
+  "changed_by": "admin@example.com",
+  "notes": "Profile submitted for review"
 }
 ```
 
 **cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/onboarding-admin/status-history/7' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"previous_status": "PENDING", "new_status": "SUBMITTED", "changed_by": "admin@example.com"}'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/onboarding-admin/status-history/7' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"status": "APPROVED", "notes": "Profile approved"}'
-```
+
+**Response (201):** `DoctorStatusHistoryResponse` object
 
 ---
 
-## 8. DROPDOWN DATA
+### 7.10 Get Status History
+**GET** `/onboarding-admin/status-history/{doctor_id}`
 
-### 8.1 Get All Dropdown Data
-**GET** `/dropdown-data/all`
-
-Get all dropdown values in a single request.
+Retrieve all status history entries for a doctor.
 
 **cURL:**
+```bash
+curl 'http://127.0.0.1:8000/api/v1/onboarding-admin/status-history/7' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/dropdown-data/all' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
+
+**Response (200):** Array of `DoctorStatusHistoryResponse` objects
 
 ---
 
-### 8.2 Get Specialisations
-**GET** `/dropdown-data/specialisations`
+## 8. ADMIN USERS
 
-Get unique specialisation values.
+User management for the RBAC system. Most endpoints require **Admin** role.
 
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/dropdown-data/specialisations' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 8.3 Get Sub-Specialisations
-**GET** `/dropdown-data/sub-specialisations`
-
-Get unique sub-specialisation values.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/dropdown-data/sub-specialisations' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 8.4 Get Degrees
-**GET** `/dropdown-data/degrees`
-
-Get unique degree values.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/dropdown-data/degrees' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 8.5 Add Dropdown Values
-**POST** `/dropdown-data/values`
-
-Add new values to a dropdown field.
-
-**Request Body:**
-```json
-{
-  "field_name": "specialisations",
-  "values": ["New Specialty 1", "New Specialty 2"]
-}
-```
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/dropdown-data/values' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"field_name": "specialisations", "values": ["New Specialty"]}'
-```
-
----
-
-## 9. ADMIN DROPDOWN OPTIONS
-
-### 9.1 List Dropdown Fields
-**GET** `/admin/dropdown-options/fields`
-
-Get configuration for all dropdown fields.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/admin/dropdown-options/fields' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 9.2 Get Field Options
-**GET** `/admin/dropdown-options/fields/{field_name}`
-
-Get all options for a specific field.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/admin/dropdown-options/fields/specialty' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 9.3 Add Option to Field
-**POST** `/admin/dropdown-options/fields/{field_name}`
-
-Add a new option to a dropdown field.
-
-**Request Body:**
-```json
-{
-  "value": "New Option",
-  "display_label": "New Option Label"
-}
-```
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/admin/dropdown-options/fields/specialty' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"value": "New Option"}'
-```
-
----
-
-### 9.4 Bulk Add Options
-**POST** `/admin/dropdown-options/fields/{field_name}/bulk`
-
-Add multiple options at once.
-
-**Request Body:**
-```json
-{
-  "values": ["Option 1", "Option 2", "Option 3"]
-}
-```
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/admin/dropdown-options/fields/specialty/bulk' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"values": ["Option 1", "Option 2"]}'
-```
-
----
-
-### 9.5 Update Option
-**PUT** `/admin/dropdown-options/options/{option_id}`
-
-Update an existing option.
-
-**Request Body:**
-```json
-{
-  "value": "Updated Value",
-  "display_label": "Updated Label"
-}
-```
-
-**cURL:**
-```
-curl --location --request PUT 'http://127.0.0.1:8000/api/v1/admin/dropdown-options/options/OPTION_ID' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"value": "Updated Value"}'
-```
-
----
-
-### 9.6 Delete Option
-**DELETE** `/admin/dropdown-options/options/{option_id}`
-
-Deactivate (soft delete) an option.
-
-**cURL:**
-```
-curl --location --request DELETE 'http://127.0.0.1:8000/api/v1/admin/dropdown-options/options/OPTION_ID' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 9.7 Verify Option
-**POST** `/admin/dropdown-options/options/{option_id}/verify`
-
-Mark a doctor-contributed option as verified.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/admin/dropdown-options/options/OPTION_ID/verify' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 9.8 List Unverified Options
-**GET** `/admin/dropdown-options/unverified`
-
-Get all options pending verification.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/admin/dropdown-options/unverified' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 9.9 Get All Dropdown Data
-**GET** `/admin/dropdown-options/data`
-
-Get all dropdown data for frontend forms.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/admin/dropdown-options/data' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 9.10 Get Statistics
-**GET** `/admin/dropdown-options/stats`
-
-Get dropdown options statistics.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/admin/dropdown-options/stats' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 9.11 Seed Initial Values
-**POST** `/admin/dropdown-options/seed`
-
-Seed the database with initial dropdown values.
-
-**Query Parameters:**
-- `force` (bool): Force re-seed even if data exists
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/admin/dropdown-options/seed' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-## 10. ADMIN USERS
-
-### 10.1 List Users
+### 8.1 List Users
 **GET** `/admin/users`
 
-Get paginated list of users.
+Paginated list of users with optional filtering. Requires **Admin or Operational** role.
 
 **Query Parameters:**
-- `skip` (int): Skip records (default: 0)
-- `limit` (int): Max records (default: 50)
-- `role` (string): Filter by role
-- `is_active` (bool): Filter by status
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `skip` | int | 0 | Number of records to skip |
+| `limit` | int | 50 | Records per page (max 100) |
+| `role` | list[string] | — | Filter by role(s): `admin`, `operational`, `user` |
+| `is_active` | bool | — | Filter by active status |
 
 **cURL:**
+```bash
+curl 'http://127.0.0.1:8000/api/v1/admin/users?limit=50&is_active=true' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/admin/users' \
---header 'Authorization: Bearer YOUR_TOKEN'
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "users": [
+    {
+      "id": 1,
+      "phone": "+919443453525",
+      "email": "admin@example.com",
+      "role": "admin",
+      "is_active": true,
+      "doctor_id": null,
+      "created_at": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "total": 10,
+  "skip": 0,
+  "limit": 50
+}
 ```
 
 ---
 
-### 10.2 List Admins
+### 8.2 List Admin Users
 **GET** `/admin/users/admins`
 
-Get all admin users.
+List all admin users (for audit purposes). Requires **Admin** role.
+
+**Query Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `active_only` | bool | true | Only show active admins |
 
 **cURL:**
+```bash
+curl 'http://127.0.0.1:8000/api/v1/admin/users/admins' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/admin/users/admins' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
+
+**Response (200):** Same format as List Users
 
 ---
 
-### 10.3 Get User by ID
+### 8.3 Get User by ID
 **GET** `/admin/users/{user_id}`
 
-Get details of a specific user.
+Get details of a specific user. Requires **Admin or Operational** role.
 
 **cURL:**
+```bash
+curl 'http://127.0.0.1:8000/api/v1/admin/users/1' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/admin/users/1' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
+
+**Response (200):** `UserResponse` object
 
 ---
 
-### 10.4 Create User
-**POST** `/admin/users`
+### 8.4 Seed Initial Admin (No Auth)
+**POST** `/admin/users/seed`
 
-Create a new user.
+Create the first admin user when no admins exist. **No authentication required.** This endpoint is self-disabling: once at least one admin exists, it returns `403`.
 
 **Request Body:**
 ```json
 {
-  "phone": "9876543210",
-  "email": "newuser@example.com",
-  "role": "user",
+  "phone": "+919443453525",
+  "email": "admin@example.com",
+  "role": "admin",
   "is_active": true
 }
 ```
 
 **cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/admin/users/seed' \
+  -H 'Content-Type: application/json' \
+  -d '{"phone": "+919443453525", "email": "admin@example.com", "role": "admin"}'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/admin/users' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"phone": "9876543210", "email": "newuser@example.com", "role": "user"}'
+
+**Response (201):**
+```json
+{
+  "success": true,
+  "message": "Initial admin user seeded successfully",
+  "user": { ... }
+}
 ```
 
 ---
 
-### 10.5 Update User
-**PATCH** `/admin/users/{user_id}`
+### 8.5 Create User
+**POST** `/admin/users`
 
-Update user details.
+Create a new user with a specified role. Requires **Admin** role.
 
 **Request Body:**
 ```json
 {
-  "email": "updated@example.com"
+  "phone": "+919876543210",
+  "email": "ops@example.com",
+  "role": "operational",
+  "is_active": true,
+  "doctor_id": null
 }
 ```
 
 **cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/admin/users' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"phone": "+919876543210", "email": "ops@example.com", "role": "operational"}'
 ```
-curl --location --request PATCH 'http://127.0.0.1:8000/api/v1/admin/users/1' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"email": "updated@example.com"}'
+
+**Response (201):**
+```json
+{
+  "success": true,
+  "message": "User created successfully with role 'operational'",
+  "user": { ... }
+}
 ```
 
 ---
 
-### 10.6 Update User Role
+### 8.6 Update User
+**PATCH** `/admin/users/{user_id}`
+
+Update a user's details (role, active status, doctor_id). Requires **Admin** role. Cannot demote or deactivate yourself.
+
+**Request Body:**
+```json
+{
+  "role": "operational",
+  "is_active": true,
+  "doctor_id": 7
+}
+```
+
+**cURL:**
+```bash
+curl -X PATCH 'http://127.0.0.1:8000/api/v1/admin/users/2' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"role": "operational"}'
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "User updated successfully",
+  "user": { ... }
+}
+```
+
+---
+
+### 8.7 Update User Role
 **PATCH** `/admin/users/{user_id}/role`
 
-Change a user's role.
+Change a user's role. Requires **Admin** role.
 
 **Request Body:**
 ```json
@@ -1714,558 +1358,614 @@ Change a user's role.
 ```
 
 **cURL:**
+```bash
+curl -X PATCH 'http://127.0.0.1:8000/api/v1/admin/users/2/role' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"role": "admin"}'
 ```
-curl --location --request PATCH 'http://127.0.0.1:8000/api/v1/admin/users/1/role' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"role": "admin"}'
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "User role changed from 'user' to 'admin'",
+  "user": { ... }
+}
 ```
 
 ---
 
-### 10.7 Update User Status
+### 8.8 Activate/Deactivate User
 **PATCH** `/admin/users/{user_id}/status`
 
-Activate or deactivate a user.
+Activate or deactivate a user (soft action). Requires **Admin** role.
 
 **Request Body:**
 ```json
 {
-  "is_active": true
+  "is_active": false
 }
 ```
 
 **cURL:**
+```bash
+curl -X PATCH 'http://127.0.0.1:8000/api/v1/admin/users/2/status' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"is_active": false}'
 ```
-curl --location --request PATCH 'http://127.0.0.1:8000/api/v1/admin/users/1/status' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"is_active": true}'
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "User deactivated successfully",
+  "user": { ... }
+}
 ```
 
 ---
 
-### 10.8 Delete User
+### 8.9 Deactivate User (Soft Delete)
 **DELETE** `/admin/users/{user_id}`
 
-Deactivate a user (soft delete).
+Deactivate a user. Use this instead of hard delete to preserve audit trail. Requires **Admin** role.
 
 **cURL:**
+```bash
+curl -X DELETE 'http://127.0.0.1:8000/api/v1/admin/users/2' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
 ```
-curl --location --request DELETE 'http://127.0.0.1:8000/api/v1/admin/users/1' \
---header 'Authorization: Bearer YOUR_TOKEN'
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "User deactivated successfully",
+  "user_id": 2
+}
 ```
 
 ---
 
-## 11. TESTIMONIALS
+## 9. ADMIN DROPDOWNS
 
-### 11.1 List Active Testimonials (Public)
-**GET** `/testimonials`
+Admin management of dropdown options. All endpoints require **Admin or Operational** role.
 
-Get active testimonials for homepage.
+### 9.1 List Supported Fields
+**GET** `/admin/dropdowns/fields`
+
+Return the canonical list of dropdown field names and their descriptions.
+
+**cURL:**
+```bash
+curl 'http://127.0.0.1:8000/api/v1/admin/dropdowns/fields' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Supported dropdown fields",
+  "data": {
+    "fields": [
+      { "field_name": "specialty", "description": "Medical specialty" },
+      { "field_name": "qualifications", "description": "Medical qualifications" }
+    ]
+  }
+}
+```
+
+---
+
+### 9.2 List All Options
+**GET** `/admin/dropdowns`
+
+List all dropdown options across all fields with optional filtering.
 
 **Query Parameters:**
-- `skip` (int): Skip records (default: 0)
-- `limit` (int): Max records (default: 20)
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `field_name` | string | — | Filter by field name |
+| `status` | string | — | Filter by: `approved`, `pending`, `rejected` |
+| `search` | string | — | Substring match on value/label |
+| `skip` | int | 0 | Pagination offset |
+| `limit` | int | 50 | Items per page (max 200) |
 
 **cURL:**
+```bash
+curl 'http://127.0.0.1:8000/api/v1/admin/dropdowns?status=pending&limit=50' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/testimonials'
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Found 15 option(s)",
+  "data": {
+    "items": [
+      {
+        "id": 1,
+        "field_name": "specialty",
+        "value": "Sports Medicine",
+        "label": "Sports Medicine",
+        "status": "pending",
+        "is_system": false,
+        ...
+      }
+    ],
+    "total": 15,
+    "skip": 0,
+    "limit": 50,
+    "pending_count": 5
+  }
+}
 ```
 
 ---
 
-### 11.2 List All Testimonials (Admin)
-**GET** `/testimonials/admin`
+### 9.3 List Pending Options
+**GET** `/admin/dropdowns/pending`
 
-Get all testimonials including inactive.
+Shortcut to list only pending options awaiting review.
+
+**Query Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `field_name` | string | — | Filter by field name |
+| `skip` | int | 0 | Pagination offset |
+| `limit` | int | 50 | Items per page (max 200) |
 
 **cURL:**
+```bash
+curl 'http://127.0.0.1:8000/api/v1/admin/dropdowns/pending' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/testimonials/admin' \
---header 'Authorization: Bearer YOUR_TOKEN'
+
+**Response (200):** Same format as List All Options (all items are `pending`)
+
+---
+
+### 9.4 Get Option by ID
+**GET** `/admin/dropdowns/{option_id}`
+
+Retrieve a single dropdown option by its ID.
+
+**cURL:**
+```bash
+curl 'http://127.0.0.1:8000/api/v1/admin/dropdowns/42' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Dropdown option retrieved",
+  "data": {
+    "id": 42,
+    "field_name": "specialty",
+    "value": "Sports Medicine",
+    "label": "Sports Medicine",
+    "status": "pending",
+    "is_system": false,
+    "display_order": 0,
+    "submitted_by": "12",
+    "reviewed_by": null,
+    "review_notes": null,
+    "created_at": "2026-02-28T17:30:00Z"
+  }
+}
 ```
 
 ---
 
-### 11.3 Get Testimonial by ID
-**GET** `/testimonials/{testimonial_id}`
+### 9.5 Create Option
+**POST** `/admin/dropdowns`
 
-Get a single testimonial.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/testimonials/TESTIMONIAL_ID'
-```
-
----
-
-### 11.4 Create Testimonial
-**POST** `/testimonials`
-
-Create a new testimonial.
+Create a new dropdown option (approved immediately since it's admin-created).
 
 **Request Body:**
 ```json
 {
-  "doctor_name": "Dr. John Doe",
-  "specialty": "Cardiology",
-  "comment": "Great platform for doctors!",
-  "rating": 5
+  "field_name": "specialty",
+  "value": "Nuclear Medicine",
+  "label": "Nuclear Medicine",
+  "is_system": false,
+  "display_order": 0
 }
 ```
 
 **cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/testimonials' \
---header 'Content-Type: application/json' \
---data '{
-  "doctor_name": "Dr. John Doe",
-  "specialty": "Cardiology",
-  "comment": "Great platform!",
-  "rating": 5
-}'
-```
-
----
-
-### 11.5 Update Testimonial
-**PATCH** `/testimonials/{testimonial_id}`
-
-Update a testimonial.
-
-**Request Body:**
-```json
-{
-  "rating": 4
-}
-```
-
-**cURL:**
-```
-curl --location --request PATCH 'http://127.0.0.1:8000/api/v1/testimonials/TESTIMONIAL_ID' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"rating": 4}'
-```
-
----
-
-### 11.6 Delete Testimonial
-**DELETE** `/testimonials/{testimonial_id}`
-
-Delete a testimonial.
-
-**cURL:**
-```
-curl --location --request DELETE 'http://127.0.0.1:8000/api/v1/testimonials/TESTIMONIAL_ID' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 11.7 Toggle Active Status
-**POST** `/testimonials/{testimonial_id}/toggle-active`
-
-Toggle testimonial active/inactive status.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/testimonials/TESTIMONIAL_ID/toggle-active' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-## 12. BLOB STORAGE
-
-### 12.1 Get Blob File
-**GET** `/blobs/{doctor_id}/{media_category}/{blob_filename}`
-
-Stream a blob file from storage.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/blobs/7/profile_photo/photo.jpg' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 12.2 Check Blob Exists
-**HEAD** `/blobs/{doctor_id}/{media_category}/{blob_filename}`
-
-Check if blob exists without downloading.
-
-**cURL:**
-```
-curl --location --head 'http://127.0.0.1:8000/api/v1/blobs/7/profile_photo/photo.jpg' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 12.3 Get Storage Stats
-**GET** `/blobs/stats`
-
-Get blob storage statistics.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/blobs/stats' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-## 13. VOICE ONBOARDING
-
-### 13.1 Start Voice Session
-**POST** `/voice/start`
-
-Start a new voice onboarding session.
-
-**Request Body:**
-```json
-{
-  "language": "en"
-}
-```
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/voice/start' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"language": "en"}'
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/admin/dropdowns' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"field_name": "specialty", "value": "Nuclear Medicine"}'
 ```
 
 **Response (201):**
 ```json
 {
-  "session_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "active",
-  "greeting": "Hello! I'm here to help you complete your registration...",
-  "fields_total": 8,
-  "created_at": "2026-01-11T09:30:00Z"
+  "success": true,
+  "message": "Option 'Nuclear Medicine' created and approved for 'specialty'",
+  "data": { ... }
 }
 ```
 
 ---
 
-### 13.2 Voice Chat
-**POST** `/voice/chat`
+### 9.6 Update Option
+**PATCH** `/admin/dropdowns/{option_id}`
 
-Send a message in the voice conversation.
+Update label, display order, or review notes.
 
 **Request Body:**
 ```json
 {
-  "session_id": "550e8400-e29b-41d4-a716-446655440000",
-  "user_transcript": "My name is Dr. Sarah Johnson"
+  "label": "Updated Label",
+  "display_order": 5,
+  "review_notes": "Corrected spelling"
 }
 ```
 
 **cURL:**
+```bash
+curl -X PATCH 'http://127.0.0.1:8000/api/v1/admin/dropdowns/42' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"label": "Updated Label"}'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/voice/chat' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{
-  "session_id": "SESSION_ID",
-  "user_transcript": "My name is Dr. Sarah Johnson"
-}'
-```
+
+**Response (200):** Updated `DropdownOptionResponse` object
 
 ---
 
-### 13.3 Get Session Status
-**GET** `/voice/session/{session_id}`
+### 9.7 Delete Option
+**DELETE** `/admin/dropdowns/{option_id}`
 
-Get current status of a voice session.
+Delete a dropdown option. System-seeded options (`is_system=true`) cannot be deleted.
 
 **cURL:**
+```bash
+curl -X DELETE 'http://127.0.0.1:8000/api/v1/admin/dropdowns/42' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/voice/session/SESSION_ID' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
 
----
-
-### 13.4 Finalize Session
-**POST** `/voice/session/{session_id}/finalize`
-
-Finalize a completed session and get doctor data.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/voice/session/SESSION_ID/finalize' \
---header 'Authorization: Bearer YOUR_TOKEN'
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Dropdown option 42 deleted successfully",
+  "data": { "option_id": 42, "deleted": true }
+}
 ```
 
 ---
 
-### 13.5 Cancel Session
-**DELETE** `/voice/session/{session_id}`
+### 9.8 Approve Option
+**POST** `/admin/dropdowns/{option_id}/approve`
 
-Cancel and delete a voice session.
-
-**cURL:**
-```
-curl --location --request DELETE 'http://127.0.0.1:8000/api/v1/voice/session/SESSION_ID' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-## 14. VOICE CONFIG
-
-### 14.1 Get Voice Configuration
-**GET** `/voice-config`
-
-Get full voice onboarding configuration.
-
-**Query Parameters:**
-- `active_only` (bool): Only return active blocks/fields (default: true)
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/voice-config' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 14.2 Get Field Config
-**GET** `/voice-config/field-config`
-
-Get field configuration dictionary for voice service.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/voice-config/field-config' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 14.3 Get Block
-**GET** `/voice-config/blocks/{block_number}`
-
-Get a specific block by number.
-
-**cURL:**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/voice-config/blocks/1' \
---header 'Authorization: Bearer YOUR_TOKEN'
-```
-
----
-
-### 14.4 Create Block
-**POST** `/voice-config/blocks`
-
-Create a new voice onboarding block.
+Approve a pending dropdown option. Once approved, it appears in public dropdowns.
 
 **Request Body:**
 ```json
 {
-  "block_number": 1,
-  "block_name": "identity",
-  "display_name": "Professional Identity",
-  "ai_prompt": "Let's start with your basic information...",
-  "completion_percentage": 20
+  "review_notes": "Looks good"
 }
 ```
 
 **cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/admin/dropdowns/42/approve' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"review_notes": "Approved"}'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/voice-config/blocks' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{
-  "block_number": 1,
-  "block_name": "identity",
-  "display_name": "Professional Identity"
-}'
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Option 'Sports Medicine' approved for 'specialty'",
+  "data": { ... }
+}
 ```
 
 ---
 
-### 14.5 Update Block
-**PATCH** `/voice-config/blocks/{block_id}`
+### 9.9 Reject Option
+**POST** `/admin/dropdowns/{option_id}/reject`
 
-Update a voice onboarding block.
+Reject a pending dropdown option. Rejected options remain in the database for audit purposes.
 
 **Request Body:**
 ```json
 {
-  "display_name": "Updated Name"
+  "review_notes": "Duplicate of existing option"
 }
 ```
 
 **cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/admin/dropdowns/42/reject' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"review_notes": "Duplicate"}'
 ```
-curl --location --request PATCH 'http://127.0.0.1:8000/api/v1/voice-config/blocks/BLOCK_ID' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"display_name": "Updated Name"}'
-```
 
----
-
-### 14.6 Delete Block
-**DELETE** `/voice-config/blocks/{block_id}`
-
-Delete a voice onboarding block.
-
-**cURL:**
-```
-curl --location --request DELETE 'http://127.0.0.1:8000/api/v1/voice-config/blocks/BLOCK_ID' \
---header 'Authorization: Bearer YOUR_TOKEN'
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Option 'Sports Medicine' rejected for 'specialty'",
+  "data": { ... }
+}
 ```
 
 ---
 
-### 14.7 Create Field
-**POST** `/voice-config/fields`
+### 9.10 Bulk Approve
+**POST** `/admin/dropdowns/bulk-approve`
 
-Create a new voice onboarding field.
+Approve multiple pending options at once (max 200 per request).
 
 **Request Body:**
 ```json
 {
-  "block_id": 1,
-  "field_name": "full_name",
-  "display_name": "Full Name",
-  "field_type": "text",
-  "is_required": true,
-  "ai_question": "What is your full name?"
+  "option_ids": [42, 43, 44],
+  "review_notes": "Batch approved"
 }
 ```
 
 **cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/admin/dropdowns/bulk-approve' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"option_ids": [42, 43, 44]}'
 ```
-curl --location 'http://127.0.0.1:8000/api/v1/voice-config/fields' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{
-  "block_id": 1,
-  "field_name": "full_name",
-  "display_name": "Full Name",
-  "field_type": "text",
-  "is_required": true
-}'
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "3 option(s) approved successfully",
+  "data": {
+    "action": "approved",
+    "updated_count": 3,
+    "review_notes": "Batch approved"
+  }
+}
 ```
 
 ---
 
-### 14.8 Update Field
-**PATCH** `/voice-config/fields/{field_id}`
+### 9.11 Bulk Reject
+**POST** `/admin/dropdowns/bulk-reject`
 
-Update a voice onboarding field.
+Reject multiple pending options at once (max 200 per request).
 
 **Request Body:**
 ```json
 {
-  "is_required": false
+  "option_ids": [45, 46],
+  "review_notes": "Duplicates"
 }
 ```
 
 **cURL:**
+```bash
+curl -X POST 'http://127.0.0.1:8000/api/v1/admin/dropdowns/bulk-reject' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"option_ids": [45, 46], "review_notes": "Duplicates"}'
 ```
-curl --location --request PATCH 'http://127.0.0.1:8000/api/v1/voice-config/fields/FIELD_ID' \
---header 'Authorization: Bearer YOUR_TOKEN' \
---header 'Content-Type: application/json' \
---data '{"is_required": false}'
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "2 option(s) rejected successfully",
+  "data": {
+    "action": "rejected",
+    "updated_count": 2,
+    "review_notes": "Duplicates"
+  }
+}
 ```
 
 ---
 
-### 14.9 Delete Field
-**DELETE** `/voice-config/fields/{field_id}`
+## 10. ADDITIONAL REFERENCE
 
-Delete a voice onboarding field.
+### Authentication Details
 
-**cURL:**
+All endpoints (except Health, public Dropdowns, Resume Extraction, and Admin Seed) require a **JWT Bearer Token**:
+
 ```
-curl --location --request DELETE 'http://127.0.0.1:8000/api/v1/voice-config/fields/FIELD_ID' \
---header 'Authorization: Bearer YOUR_TOKEN'
+Authorization: Bearer <access_token>
+```
+
+Obtain a token via `/auth/otp/verify`, `/auth/admin/otp/verify`, or `/auth/google/verify`.
+
+**Interactive API Docs:**
+- **Swagger UI:** `http://localhost:8000/docs`
+- **ReDoc:** `http://localhost:8000/redoc`
+
+---
+
+### CSV Bulk Upload — Detailed Workflow
+
+All three CSV endpoints require **Admin or Operational** role.
+
+**Auth chain:**
+```
+Bearer token
+  └── require_authentication()   [JWT signature + expiry check]
+        └── get_current_user()   [load User from DB, check is_active]
+              └── require_admin_or_operational()  [role ∈ {admin, operational}]
+```
+
+**Two-Phase Workflow:**
+```
+Step 1  POST /doctors/bulk-upload/csv/validate   ← upload CSV, get ALL row errors
+           │
+           ├── errors found  → fix CSV, repeat Step 1
+           │
+           └── valid=true, errors=[]
+                    │
+Step 2  POST /doctors/bulk-upload/csv           ← upload clean CSV, write to DB
+           │
+           ├── rows created with onboarding_status = PENDING
+           └── audit entry added to doctor_status_history
+```
+
+| Constraint | Value |
+|------------|-------|
+| Max rows | 500 |
+| Encoding | UTF-8 (BOM stripped automatically) |
+| Multi-value fields | Pipe-separated: `English\|Hindi\|Marathi` |
+| Required columns | `first_name`, `last_name`, `phone` |
+| Phone normalisation | Auto-converted to E.164 `+91XXXXXXXXXX` |
+
+**Validated fields per row:**
+
+| Field | Validation |
+|-------|-----------|
+| `phone` | Required; digits only ≥ 10; normalised to `+91…` |
+| `first_name` | Required; non-empty |
+| `last_name` | Required; non-empty |
+| `email` | Optional; must contain `@` and a dot in domain |
+| `years_of_experience` | Optional; numeric 0–100 |
+| `consultation_fee` | Optional; numeric ≥ 0 |
+| `registration_year` | Optional; numeric 1900–2100 |
+| `year_of_mbbs` | Optional; numeric 1900–2100 |
+| `year_of_specialisation` | Optional; numeric 1900–2100 |
+| `years_of_clinical_experience` | Optional; numeric 0–100 |
+| `years_post_specialisation` | Optional; numeric 0–100 |
+
+**Per-row behaviour on confirm upload:**
+- **New doctor** (no existing record with that phone): Creates `doctors` + `doctor_identity` (PENDING) + `doctor_status_history` audit entry
+- **Existing doctor** (phone already in DB): Updates profile fields; onboarding status unchanged
+- **DB-level error** (e.g. unique constraint): Row rolled back via savepoint; others continue
+
+---
+
+### Admin Verification & Email Notifications — Detailed Flow
+
+When an admin verifies or rejects a doctor's profile, the backend optionally sends an email:
+
+1. **Admin opens popup** → frontend fetches pre-filled template via `GET /onboarding/email-template/{doctor_id}?action=verified|rejected`
+2. **Admin edits** subject/body if desired
+3. **Admin clicks Send** → frontend calls `POST /onboarding/verify/{doctor_id}` or `POST /onboarding/reject/{doctor_id}`
+
+**Verify payload fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `send_email` | bool | false | Trigger email delivery |
+| `email_subject` | string \| null | null | Admin-edited subject; template default if omitted |
+| `email_body` | string \| null | null | Admin-edited HTML body; template default if omitted |
+
+**Reject payload** adds `reason` (string \| null) for the rejection reason.
+
+> **Non-blocking email**: If SMTP fails, the status change is **not rolled back**. Response includes `"email_sent": false` and `"email_error"`.
+
+**Email template placeholders** (configured in `config/email_templates.yaml`):
+
+| Placeholder | Description |
+|-------------|-------------|
+| `{doctor_name}` | Full name with title |
+| `{first_name}` | Doctor's first name |
+| `{medical_registration_number}` | MRN on file |
+| `{specialization}` | Primary specialisation |
+| `{reason}` | Rejection reason (reject template only) |
+| `{platform_name}` | From `EMAIL_FROM_NAME` env variable |
+| `{support_email}` | From `EMAIL_FROM_ADDRESS` env variable |
+
+---
+
+### Dropdown Approval Workflow
+
+The platform manages dropdown options through a **3-status approval workflow**:
+
+| Status | Visible in public dropdowns? | Created by |
+|--------|------------------------------|------------|
+| `approved` | ✅ Yes | Admin direct-create or approved user submission |
+| `pending` | ❌ No — hidden until reviewed | Doctor/user `POST /dropdowns/submit` |
+| `rejected` | ❌ Never | Admin reject action |
+
+**Supported fields:** `specialty`, `sub_specialties`, `qualifications`, `fellowships`, `professional_memberships`, `languages_spoken`, `age_groups_treated`, `primary_practice_location`, `practice_segments`, `training_experience`, `motivation_in_practice`, `unwinding_after_work`, `quality_time_interests`, `conditions_treated`, `procedures_performed`
+
+---
+
+### Standard Response Format
+
+**Success:**
+```json
+{
+  "success": true,
+  "message": "Operation successful",
+  "data": { }
+}
+```
+
+**Paginated:**
+```json
+{
+  "message": "Items retrieved",
+  "data": [],
+  "pagination": {
+    "page": 1,
+    "page_size": 20,
+    "total": 100,
+    "total_pages": 5
+  }
+}
+```
+
+**Error:**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human readable message",
+    "details": {}
+  }
+}
 ```
 
 ---
 
-## Quick Start Guide
+### Error Codes
 
-### 1. Get Authentication Token
-
-First, request an OTP:
-```
-curl --location 'http://127.0.0.1:8000/api/v1/auth/otp/request' \
---header 'Content-Type: application/json' \
---data '{"mobile_number": "YOUR_PHONE_NUMBER"}'
-```
-
-Then verify the OTP to get your token:
-```
-curl --location 'http://127.0.0.1:8000/api/v1/auth/otp/verify' \
---header 'Content-Type: application/json' \
---data '{"mobile_number": "YOUR_PHONE_NUMBER", "otp": "RECEIVED_OTP"}'
-```
-
-**Or use the dev endpoint (accepts any OTP):**
-```
-curl --location 'http://127.0.0.1:8000/api/v1/validateandlogin' \
---header 'Content-Type: application/json' \
---data '{"phone_number": "YOUR_PHONE_NUMBER", "otp": "123456"}'
-```
-
-### 2. Use Token in Requests
-
-Add the token to all authenticated requests:
-```
---header 'Authorization: Bearer YOUR_ACCESS_TOKEN'
-```
-
-### 3. Token Expiry
-
-Tokens expire after 30 minutes (1800 seconds). Request a new token when expired.
+| Code | HTTP | Description |
+|------|------|-------------|
+| `UNAUTHORIZED` | 401 | Missing or invalid token |
+| `INVALID_TOKEN` | 401 | Token is invalid |
+| `OTP_EXPIRED` | 401 | OTP has expired |
+| `INVALID_OTP` | 401 | OTP is incorrect |
+| `USER_NOT_FOUND` | 401 | User not in users table |
+| `USER_INACTIVE` | 403 | User account deactivated |
+| `ADMIN_REQUIRED` | 403 | Admin role required |
+| `INSUFFICIENT_PERMISSIONS` | 403 | Role lacks permissions |
+| `DOCTOR_NOT_FOUND` | 404 | Doctor record not found |
+| `VALIDATION_ERROR` | 422 | Request validation failed |
+| `EXTRACTION_ERROR` | 422 | AI extraction failed |
 
 ---
 
-## Error Codes
+### Rate Limits
 
-| Code | Description |
-|------|-------------|
-| 400 | Bad Request - Invalid input |
-| 401 | Unauthorized - Invalid/expired token |
-| 403 | Forbidden - Insufficient permissions |
-| 404 | Not Found - Resource doesn't exist |
-| 409 | Conflict - Resource already exists |
-| 410 | Gone - Session expired |
-| 422 | Unprocessable Entity - Validation error |
-| 500 | Internal Server Error |
-| 503 | Service Unavailable |
-
----
-
-## Total: 109 Endpoints
-
-| Category | Count |
-|----------|-------|
-| Authentication | 4 |
-| Health | 3 |
-| Doctors | 9 |
-| Hospitals | 11 |
-| Affiliations | 6 |
-| Onboarding | 14 |
-| Onboarding Admin | 16 |
-| Dropdown Data | 5 |
-| Admin Dropdown | 11 |
-| Admin Users | 8 |
-| Testimonials | 7 |
-| Blob Storage | 3 |
-| Voice | 5 |
-| Voice Config | 7 |
-| **Total** | **109** |
+| Endpoint Type | Limit |
+|--------------|-------|
+| OTP Request | 3 per minute per phone |
+| OTP Verify | 5 attempts per OTP |
+| Resume Extraction | 10 per minute |
+| Voice Chat | 60 per minute per session |
+| Admin APIs | 100 per minute |
