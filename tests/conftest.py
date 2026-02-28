@@ -17,7 +17,9 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from src.app.core.config import settings
+from src.app.core.config import get_settings
+
+settings = get_settings()
 from src.app.db.session import Base, get_db
 from src.app.main import app
 
@@ -102,6 +104,7 @@ async def test_engine() -> AsyncGenerator[AsyncEngine, None]:
 
     await engine.dispose()
 
+
 @pytest_asyncio.fixture(scope="function")
 async def db_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
     """Create a test database session."""
@@ -117,18 +120,47 @@ async def db_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, N
         yield session
         await session.rollback()
 
+
 @pytest_asyncio.fixture(scope="function")
 async def client(test_engine: AsyncEngine) -> AsyncGenerator[AsyncClient, None]:
-    """Create a test HTTP client with overridden dependencies."""
+    """Create a test HTTP client with overridden dependencies.
+
+    The admin user required by ``auth_headers`` is seeded here — in the same
+    session factory used by ``override_get_db`` — so it is visible to all
+    requests made through this client.  The previous ``setup_admin_user``
+    autouse fixture used the separate ``db_session`` fixture whose transaction
+    is rolled back before client requests run, making the admin user invisible.
+    """
+    from sqlalchemy import select as _select
+
+    from src.app.models.enums import UserRole
+    from src.app.models.user import User
+
+    async_session_factory = async_sessionmaker(
+        test_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
+
+    # Seed the admin user once, committed so every subsequent request sees it.
+    async with async_session_factory() as seed_session:
+        result = await seed_session.execute(
+            _select(User).where(User.phone == "+919999999999")
+        )
+        if result.scalar_one_or_none() is None:
+            seed_session.add(
+                User(
+                    phone="+919999999999",
+                    email="admin@example.com",
+                    role=UserRole.ADMIN.value,
+                    is_active=True,
+                )
+            )
+            await seed_session.commit()
 
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
-        async_session_factory = async_sessionmaker(
-            test_engine,
-            class_=AsyncSession,
-            expire_on_commit=False,
-            autocommit=False,
-            autoflush=False,
-        )
         async with async_session_factory() as session:
             try:
                 yield session
@@ -145,6 +177,7 @@ async def client(test_engine: AsyncEngine) -> AsyncGenerator[AsyncClient, None]:
 
     app.dependency_overrides.clear()
 
+
 @pytest.fixture
 def sample_doctor_data() -> dict:
     """Sample doctor data for tests.
@@ -160,6 +193,7 @@ def sample_doctor_data() -> dict:
         "gender": "Male",
         "primary_specialization": "Cardiology",
         "medical_registration_number": "MED-12345",
+        "medical_council": "Medical Council of India",
         "registration_year": 2005,
         "registration_authority": "Medical Council",
         "years_of_experience": 15,
@@ -193,8 +227,13 @@ def sample_update_data() -> dict:
 
 @pytest.fixture
 def mock_firebase(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Mock Firebase token verification to prevent actual API calls."""
-    def mock_verify_token(token: str) -> dict:
+    """Mock Firebase token verification to prevent actual API calls.
+
+    ``verify_firebase_token`` is async — the mock must also be async so that
+    ``await verify_firebase_token(...)`` in the Google Sign-In endpoint does
+    not raise ``TypeError: object dict can't be used in 'await' expression``.
+    """
+    async def mock_verify_token(token: str) -> dict:
         return {
             "uid": "test_firebase_uid",
             "email": "test@example.com",
@@ -252,23 +291,4 @@ def mock_blob_storage() -> Generator[MagicMock, None, None]:
 
         yield mock_instance
 
-@pytest_asyncio.fixture(scope="function", autouse=True)
-async def setup_admin_user(db_session: AsyncSession) -> None:
-    """Ensure an admin user exists for the default auth_headers token."""
-    from sqlalchemy import select
 
-    from src.app.models.enums import UserRole
-    from src.app.models.user import User
-
-    result = await db_session.execute(select(User).where(User.phone == "+919999999999"))
-    user = result.scalar_one_or_none()
-
-    if not user:
-        user = User(
-            phone="+919999999999",
-            email="admin@example.com",
-            role=UserRole.ADMIN.value,
-            is_active=True,
-        )
-        db_session.add(user)
-        await db_session.commit()

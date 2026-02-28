@@ -11,8 +11,9 @@ All endpoints require admin authentication.
 """
 from __future__ import annotations
 
-import logging
+import asyncio
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,7 +33,7 @@ from ....schemas.user import (
     UserUpdateResponse,
 )
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(
     prefix="/admin/users",
@@ -62,7 +63,7 @@ async def get_user_repo(
     description="Get paginated list of users with optional filtering by role and status.",
 )
 async def list_users(
-    current_user: AdminOrOperationalUser,  # Allows admin or operational role
+    current_user: AdminOrOperationalUser,
     repo: UserRepository = Depends(get_user_repo),
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(50, ge=1, le=100, description="Number of records to return"),
@@ -70,17 +71,16 @@ async def list_users(
     is_active: bool | None = Query(None, description="Filter by active status"),
 ) -> UserListResponse:
     """List all users with pagination and optional filtering."""
-    users = await repo.get_all(
-        skip=skip,
-        limit=limit,
-        role=role,
-        is_active=is_active,
+    # Run the page query and total count query concurrently.
+    users, total = await asyncio.gather(
+        repo.get_all(skip=skip, limit=limit, role=role, is_active=is_active),
+        repo.count_all(role=role, is_active=is_active),
     )
 
     return UserListResponse(
         success=True,
         users=[UserResponse.model_validate(u) for u in users],
-        total=len(users),
+        total=total,  # real total, not just the page size
         skip=skip,
         limit=limit,
     )
@@ -93,7 +93,7 @@ async def list_users(
     description="Get all admin users (for audit purposes).",
 )
 async def list_admins(
-    admin: AdminUser,  # Requires admin role
+    admin: AdminUser,
     repo: UserRepository = Depends(get_user_repo),
     active_only: bool = Query(True, description="Only show active admins"),
 ) -> UserListResponse:
@@ -117,7 +117,7 @@ async def list_admins(
 )
 async def get_user(
     user_id: int,
-    current_user: AdminOrOperationalUser,  # Allows admin or operational
+    current_user: AdminOrOperationalUser,
     repo: UserRepository = Depends(get_user_repo),
 ) -> UserResponse:
     """Get a specific user by ID."""
@@ -169,9 +169,11 @@ async def seed_admin_user(
     # Force role to admin for seeding
     payload_role = payload.role
     if payload_role != UserRole.ADMIN.value:
-        logger.info(f"Seed endpoint overriding role '{payload_role}' to 'admin'")
+        logger.info("Seed endpoint overriding role to admin", original_role=payload_role)
 
-    # Check for duplicate phone
+    # Check for duplicate phone.
+    # The /seed endpoint is public — do NOT expose existing_user_id in the
+    # error response, as that enables unauthenticated user enumeration.
     existing = await repo.get_by_phone(payload.phone)
     if existing:
         raise HTTPException(
@@ -179,7 +181,6 @@ async def seed_admin_user(
             detail={
                 "success": False,
                 "message": "User with this phone number already exists",
-                "existing_user_id": existing.id,
             },
         )
 
@@ -192,7 +193,6 @@ async def seed_admin_user(
                 detail={
                     "success": False,
                     "message": "User with this email already exists",
-                    "existing_user_id": existing_email.id,
                 },
             )
 
@@ -204,7 +204,7 @@ async def seed_admin_user(
         doctor_id=payload.doctor_id,
     )
 
-    logger.info(f"Seeded initial admin user: id={user.id}, phone={payload.phone}")
+    logger.info("Seeded initial admin user", user_id=user.id)
 
     return UserCreateResponse(
         success=True,
@@ -222,7 +222,7 @@ async def seed_admin_user(
 )
 async def create_user(
     payload: UserCreate,
-    admin: AdminUser,  # Requires admin role
+    admin: AdminUser,
     repo: UserRepository = Depends(get_user_repo),
 ) -> UserCreateResponse:
     """Create a new user — requires admin authentication."""
@@ -259,9 +259,7 @@ async def create_user(
         doctor_id=payload.doctor_id,
     )
 
-    logger.info(
-        f"Admin {admin.id} created user {user.id} with role {payload.role}"
-    )
+    logger.info("Admin created user", admin_id=admin.id, user_id=user.id, role=payload.role)
 
     return UserCreateResponse(
         success=True,
@@ -283,7 +281,7 @@ async def create_user(
 async def update_user(
     user_id: int,
     payload: UserUpdate,
-    admin: AdminUser,  # Requires admin role
+    admin: AdminUser,
     repo: UserRepository = Depends(get_user_repo),
 ) -> UserUpdateResponse:
     """Update a user's details."""
@@ -315,20 +313,16 @@ async def update_user(
             },
         )
 
-    # Apply updates
-    if payload.role is not None:
-        user = await repo.update_role(user_id, payload.role)
+    # Apply all requested changes in a single transaction so the row is never
+    # left in a partially-updated state (e.g. role changed but is_active not).
+    user = await repo.update_fields(
+        user_id,
+        role=payload.role,
+        is_active=payload.is_active,
+        doctor_id=payload.doctor_id,
+    )
 
-    if payload.is_active is not None:
-        user = await repo.set_active(user_id, payload.is_active)
-
-    if payload.doctor_id is not None:
-        user = await repo.link_doctor(user_id, payload.doctor_id)
-
-    # Refresh user data
-    user = await repo.get_by_id(user_id)
-
-    logger.info(f"Admin {admin.id} updated user {user_id}")
+    logger.info("Admin updated user", admin_id=admin.id, user_id=user_id)
 
     return UserUpdateResponse(
         success=True,
@@ -346,7 +340,7 @@ async def update_user(
 async def update_user_role(
     user_id: int,
     payload: UserRoleUpdate,
-    admin: AdminUser,  # Requires admin role
+    admin: AdminUser,
     repo: UserRepository = Depends(get_user_repo),
 ) -> UserUpdateResponse:
     """Update a user's role."""
@@ -371,9 +365,7 @@ async def update_user_role(
     old_role = user.role
     user = await repo.update_role(user_id, payload.role)
 
-    logger.info(
-        f"Admin {admin.id} changed user {user_id} role: {old_role} -> {payload.role}"
-    )
+    logger.info("Admin changed user role", admin_id=admin.id, user_id=user_id, old_role=old_role, new_role=payload.role)
 
     return UserUpdateResponse(
         success=True,
@@ -391,7 +383,7 @@ async def update_user_role(
 async def update_user_status(
     user_id: int,
     payload: UserStatusUpdate,
-    admin: AdminUser,  # Requires admin role
+    admin: AdminUser,
     repo: UserRepository = Depends(get_user_repo),
 ) -> UserUpdateResponse:
     """Activate or deactivate a user."""
@@ -416,7 +408,7 @@ async def update_user_status(
     user = await repo.set_active(user_id, payload.is_active)
     status_text = "activated" if payload.is_active else "deactivated"
 
-    logger.info(f"Admin {admin.id} {status_text} user {user_id}")
+    logger.info("Admin changed user status", admin_id=admin.id, user_id=user_id, new_status=status_text)
 
     return UserUpdateResponse(
         success=True,
@@ -437,7 +429,7 @@ async def update_user_status(
 )
 async def deactivate_user(
     user_id: int,
-    admin: AdminUser,  # Requires admin role
+    admin: AdminUser,
     repo: UserRepository = Depends(get_user_repo),
 ) -> UserDeleteResponse:
     """Deactivate a user (soft delete)."""
@@ -461,7 +453,7 @@ async def deactivate_user(
 
     await repo.deactivate(user_id)
 
-    logger.info(f"Admin {admin.id} deactivated user {user_id}")
+    logger.info("Admin deactivated user", admin_id=admin.id, user_id=user_id)
 
     return UserDeleteResponse(
         success=True,

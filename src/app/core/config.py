@@ -9,6 +9,7 @@ Environment file loading priority:
 3. Environment variables always override file values
 """
 import os
+import warnings
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -60,6 +61,7 @@ def _get_env_file() -> str | tuple[str, ...]:
     if env_files:
         return tuple(env_files)
     return ".env"  # Default even if doesn't exist
+
 
 class Settings(BaseSettings):
     """
@@ -205,11 +207,19 @@ class Settings(BaseSettings):
     # ========================================
     CORS_ORIGINS: str = Field(
         default="*",
-        description="Comma-separated list of allowed CORS origins"
+        description=(
+            "Comma-separated list of allowed CORS origins. "
+            "Set to explicit origins (e.g. https://app.linqmd.com) in production — "
+            "browsers reject credentials when the server echoes the wildcard '*'."
+        ),
     )
     CORS_ALLOW_CREDENTIALS: bool = Field(
-        default=True,
-        description="Allow credentials in CORS requests"
+        default=False,
+        description=(
+            "Allow credentials (cookies, Authorization header) in CORS requests. "
+            "Must be False when CORS_ORIGINS='*' (browsers block wildcard + credentials). "
+            "Set to True only when CORS_ORIGINS lists explicit origins."
+        ),
     )
     CORS_ALLOW_METHODS: str = Field(
         default="GET,POST,PUT,DELETE,OPTIONS,PATCH",
@@ -299,34 +309,58 @@ class Settings(BaseSettings):
         description="Signed URL expiry time in seconds (default 1 hour)"
     )
     # ========================================
-    # LinQMD Integration Configuration
+    # Email / SMTP Configuration
     # ========================================
-    LINQMD_API_URL: str = Field(
-        default="https://dev.linqmd.com/api/user/create",
-        description="LinQMD API endpoint for user creation"
-    )
-    LINQMD_AUTH_TOKEN: str = Field(
-        default="",
-        description="LinQMD API Basic Auth token (required for LinQMD sync)"
-    )
-    LINQMD_COOKIE: str = Field(
-        default="",
-        description="LinQMD API session cookie (required for LinQMD sync)"
-    )
-
-    LINQMD_SYNC_ENABLED: bool = Field(
+    EMAIL_ENABLED: bool = Field(
         default=False,
-        description="Enable automatic sync to LinQMD after onboarding"
+        description=(
+            "Enable outbound email sending.  Set to True and configure the "
+            "SMTP_* variables below to activate email notifications."
+        ),
     )
-    LINQMD_DEFAULT_PASSWORD: str = Field(
+    SMTP_HOST: str = Field(
         default="",
-        description="Default password for new LinQMD users (should be changed by user)"
+        description="SMTP server hostname (e.g. smtp.gmail.com, smtp.sendgrid.net)",
     )
-    LINQMD_API_TIMEOUT: int = Field(
-        default=30,
-        ge=5,
-        le=120,
-        description="Timeout for LinQMD API requests (seconds)"
+    SMTP_PORT: int = Field(
+        default=587,
+        ge=1,
+        le=65535,
+        description="SMTP server port (587 = STARTTLS, 465 = SSL/TLS, 25 = plain)",
+    )
+    SMTP_USERNAME: str = Field(
+        default="",
+        description="SMTP authentication username",
+    )
+    SMTP_PASSWORD: str = Field(
+        default="",
+        description="SMTP authentication password / API key",
+    )
+    SMTP_USE_TLS: bool = Field(
+        default=True,
+        description="Use STARTTLS upgrade on the SMTP connection (port 587)",
+    )
+    SMTP_USE_SSL: bool = Field(
+        default=False,
+        description="Use implicit SSL from connection open (port 465). Mutually exclusive with SMTP_USE_TLS.",
+    )
+    EMAIL_FROM_ADDRESS: str = Field(
+        default="",
+        description="From address for all outbound emails (e.g. noreply@linqmd.com)",
+    )
+    EMAIL_FROM_NAME: str = Field(
+        default="LinQMD Platform",
+        description="Display name in the From header of outbound emails",
+    )
+    EMAIL_TEMPLATES_PATH: str = Field(
+        default="config/email_templates.yaml",
+        description="Path to the YAML file containing email subject/body templates",
+    )
+    EMAIL_TIMEOUT_SECONDS: int = Field(
+        default=10,
+        ge=1,
+        le=60,
+        description="Timeout for SMTP connection and send operations (seconds)",
     )
 
     # ========================================
@@ -458,33 +492,36 @@ class Settings(BaseSettings):
     def validate_api_key(cls, v: str) -> str:
         """Warn if API key is not set."""
         if not v:
-            import warnings
             warnings.warn(
                 "GOOGLE_API_KEY is not set. AI features will not work.",
                 UserWarning,
-                stacklevel=2
+                stacklevel=2,
             )
         return v
-
 
     @field_validator("DATABASE_URL")
     @classmethod
     def validate_database_url(cls, v: str) -> str:
-        """Warn if DATABASE_URL is not set."""
+        """Require DATABASE_URL; warn (not silently substitute) when absent in dev."""
         if not v:
-            import warnings
             warnings.warn(
-                "DATABASE_URL is not set. Using default for development.",
+                "DATABASE_URL is not set. The application will fail on first DB access.",
                 UserWarning,
-                stacklevel=2
+                stacklevel=2,
             )
-            # Return a development default
-            return "postgresql+asyncpg://linqdev:linqdev123@localhost:5432/doctor_onboarding"
         return v
 
     @model_validator(mode="after")
     def validate_production_settings(self) -> "Settings":
         """Validate settings for production environment."""
+        # CORS contract: wildcard origins are incompatible with allow_credentials=True.
+        # Browsers (per the Fetch spec) reject such responses with a CORS error.
+        if self.CORS_ORIGINS.strip() == "*" and self.CORS_ALLOW_CREDENTIALS:
+            raise ValueError(
+                "CORS_ALLOW_CREDENTIALS cannot be True when CORS_ORIGINS is '*'. "
+                "Set CORS_ORIGINS to an explicit comma-separated list of origins."
+            )
+
         if self.is_production:
             if self.DEBUG:
                 raise ValueError("DEBUG must be False in production")
@@ -492,25 +529,33 @@ class Settings(BaseSettings):
                 raise ValueError("SECRET_KEY must be changed in production")
             if not self.GOOGLE_API_KEY:
                 raise ValueError("GOOGLE_API_KEY is required in production")
-            if not self.DATABASE_URL or "localhost" in self.DATABASE_URL:
-                raise ValueError("DATABASE_URL must be set to a production database")
-            # Validate SMS credentials for OTP functionality
+            if not self.DATABASE_URL:
+                raise ValueError("DATABASE_URL must be set in production")
+            if "localhost" in self.DATABASE_URL or "127.0.0.1" in self.DATABASE_URL:
+                raise ValueError("DATABASE_URL must not point to localhost in production")
             if not self.SMS_USER_ID or not self.SMS_USER_PASS:
-                raise ValueError("SMS_USER_ID and SMS_USER_PASS are required in production for OTP functionality")
+                raise ValueError(
+                    "SMS_USER_ID and SMS_USER_PASS are required in production "
+                    "for OTP functionality"
+                )
+            if not os.environ.get("FIREBASE_PROJECT_ID"):
+                raise ValueError(
+                    "FIREBASE_PROJECT_ID must be set in production for Google Sign-In"
+                )
+            if not os.environ.get("FIREBASE_WEB_API_KEY"):
+                raise ValueError(
+                    "FIREBASE_WEB_API_KEY must be set in production for Google Sign-In"
+                )
         return self
+
 
 @lru_cache
 def get_settings() -> Settings:
-    """
-    Get cached settings instance.
-    
-    Uses lru_cache to ensure settings are only loaded once.
-    This is the recommended way to access settings throughout the application.
-    
-    Returns:
-        Settings instance loaded from environment
+    """Return the cached application settings instance.
+
+    ``lru_cache`` ensures ``Settings()`` is constructed exactly once.
+    Prefer ``get_settings()`` over the module-level ``settings`` alias so
+    that the construction is deferred until the first call (and can be
+    overridden in tests via ``get_settings.cache_clear()``).
     """
     return Settings()
-
-# Convenience alias for direct import
-settings = get_settings()

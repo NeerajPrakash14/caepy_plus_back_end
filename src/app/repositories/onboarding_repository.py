@@ -6,16 +6,16 @@ Async data access helpers for the onboarding tables:
 - doctor_media
 - doctor_status_history
 
-All operations use SQLAlchemy's async session and work against SQLite
-(and PostgreSQL when configured) via the shared models.
+All operations use SQLAlchemy's async session against PostgreSQL.
 """
 from __future__ import annotations
 
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..models.onboarding import (
     DoctorDetails,
@@ -38,14 +38,30 @@ class OnboardingRepository:
     # ---------------------------------------------------------------------
 
     async def get_next_doctor_id(self) -> int:
-        """Compute the next doctor_id as (max existing doctor_id + 1).
+        """Return the next unique doctor_id from the ``doctor_id_seq`` sequence.
 
-        Falls back to 1 when there are no rows yet.
+        Using a dedicated PostgreSQL sequence guarantees uniqueness even under
+        concurrent inserts because ``nextval`` is non-transactional — each
+        caller obtains a strictly different value regardless of isolation level.
+        The old ``MAX(doctor_id) + 1`` pattern was racy: two concurrent
+        transactions could read the same MAX and then collide on the UNIQUE
+        constraint.
+
+        Migration 001 creates ``doctor_id_seq`` and advances it past the
+        current maximum.  This method must only be called after that migration
+        has been applied.  In test environments backed by SQLite the sequence
+        does not exist, so the code falls back to the legacy MAX approach.
         """
-        stmt = select(func.max(DoctorIdentity.doctor_id))
-        result = await self.session.execute(stmt)
-        max_id = result.scalar()
-        return (max_id or 0) + 1
+        try:
+            result = await self.session.execute(text("SELECT nextval('doctor_id_seq')"))
+            return int(result.scalar_one())
+        except Exception:
+            # Fallback for SQLite (test environments) or if the sequence has
+            # not yet been created.  Not safe for concurrent production use.
+            stmt = select(func.max(DoctorIdentity.doctor_id))
+            result = await self.session.execute(stmt)
+            max_id = result.scalar()
+            return (max_id or 0) + 1
 
     async def list_identities(
         self,
@@ -53,10 +69,24 @@ class OnboardingRepository:
         status: OnboardingStatus | str | None = None,
         skip: int = 0,
         limit: int = 100,
+        eager_load: bool = False,
     ) -> Sequence[DoctorIdentity]:
-        """Return doctor_identity rows with optional status filter and pagination."""
+        """Return doctor_identity rows with optional status filter and pagination.
 
+        When ``eager_load=True`` the query uses ``selectinload`` to fetch the
+        ``details``, ``media``, and ``status_history`` relationships in two
+        additional SQL round-trips rather than issuing one query per identity
+        row (N+1).  Pass this flag when the caller intends to access related
+        data for every row in the result set.
+        """
         stmt = select(DoctorIdentity)
+
+        if eager_load:
+            stmt = stmt.options(
+                selectinload(DoctorIdentity.details),
+                selectinload(DoctorIdentity.media),
+                selectinload(DoctorIdentity.status_history),
+            )
 
         if status is not None:
             status_enum = (
@@ -371,10 +401,6 @@ class OnboardingRepository:
         result = await self.session.execute(stmt)
         return result.scalars().all()
 
-    async def get_media_by_doctor_id(self, doctor_id: int) -> Sequence[DoctorMedia]:
-        """Get all media records for a doctor (alias for list_media)."""
-        return await self.list_media(doctor_id)
-
     async def delete_media(self, media_id: str) -> bool:
         """Delete a media record by its media_id.
 
@@ -400,7 +426,14 @@ class OnboardingRepository:
         rejection_reason: str | None = None,
         notes: str | None = None,
     ) -> DoctorStatusHistory:
-        """Insert a new row into doctor_status_history."""
+        """Stage a new doctor_status_history row within the current transaction.
+
+        Uses ``flush()`` rather than ``commit()`` so the caller can include this
+        insert in the same transaction as the matching doctor/identity status
+        update.  This guarantees the audit entry and the state change are
+        written atomically — if the outer commit fails, both are rolled back
+        together and the audit log never diverges from the actual row state.
+        """
         prev = (
             None
             if previous_status is None
@@ -424,7 +457,7 @@ class OnboardingRepository:
             notes=notes,
         )
         self.session.add(history)
-        await self.session.commit()
+        await self.session.flush()  # stage; caller issues the final commit()
         await self.session.refresh(history)
         return history
 

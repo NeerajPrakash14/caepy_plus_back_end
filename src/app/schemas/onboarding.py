@@ -128,6 +128,7 @@ class DoctorDetailsBase(BaseModel):
     sub_specialities: list[str] | None = None
     areas_of_expertise: list[str] | None = None
     registration_number: str | None = Field(default=None, max_length=100)
+    medical_council: str | None = Field(default=None, max_length=200, description="Name of the issuing medical council")
     registration_year: int | None = None
     registration_authority: str | None = Field(default=None, max_length=100)
     consultation_fee: float | None = None

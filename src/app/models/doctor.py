@@ -105,10 +105,10 @@ class Doctor(Base):
         index=True,
     )
 
-    email: Mapped[str] = mapped_column(
+    email: Mapped[str | None] = mapped_column(
         String(100),
         unique=True,
-        nullable=False,
+        nullable=True,   # NULL for phone-only signups; filled during onboarding
         index=True,
     )
 
@@ -210,6 +210,11 @@ class Doctor(Base):
         nullable=True,
         index=True,
         comment="Medical council registration/license number",
+    )
+    medical_council: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="Name of the medical council that issued the registration (e.g. Maharashtra Medical Council)",
     )
     registration_year: Mapped[int | None] = mapped_column(
         Integer,
@@ -435,42 +440,3 @@ class Doctor(Base):
         """Map professional_memberships field to memberships for response schema."""
         return self.professional_memberships
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary (for JSON serialization)."""
-
-        return {
-            "id": self.id,
-            "title": self.title,
-            "gender": self.gender,
-            "first_name": self.first_name,
-            "last_name": self.last_name,
-            "full_name": self.full_name,
-            "email": self.email,
-            "phone": self.phone,
-            "primary_specialization": self.primary_specialization,
-            "years_of_experience": self.years_of_experience,
-            "consultation_fee": self.consultation_fee,
-            "consultation_currency": self.consultation_currency,
-            "medical_registration_number": self.medical_registration_number,
-            "registration_year": self.registration_year,
-            "registration_authority": self.registration_authority,
-            "conditions_treated": self.conditions_treated,
-            "procedures_performed": self.procedures_performed,
-            "age_groups_treated": self.age_groups_treated,
-            "sub_specialties": self.sub_specialties,
-            "areas_of_expertise": self.areas_of_expertise,
-            "languages": self.languages,
-            "achievements": self.achievements,
-            "publications": self.publications,
-            "professional_memberships": self.professional_memberships,
-            "practice_locations": self.practice_locations,
-            "qualifications": self.qualifications,
-            "external_links": self.external_links,
-            "onboarding_source": self.onboarding_source,
-            "profile_photo": self.profile_photo,
-            "verbal_intro_file": self.verbal_intro_file,
-            "professional_documents": self.professional_documents,
-            "achievement_images": self.achievement_images,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }

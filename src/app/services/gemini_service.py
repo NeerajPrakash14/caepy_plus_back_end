@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from google import genai
+from google.genai import types as genai_types
 from tenacity import (
     before_sleep_log,
     retry,
@@ -29,16 +30,17 @@ from ..core.exceptions import AIServiceError, ExtractionError
 
 logger = logging.getLogger(__name__)
 
+
 class GeminiService:
     """
     Production-grade Google Gemini API wrapper using google-genai.
-    
+
     Features:
     - Automatic retry with exponential backoff for transient failures
     - JSON schema enforcement for structured outputs
     - Request/response logging for debugging
     - Async support via the new SDK
-    
+
     Usage:
         gemini = GeminiService()
         result = await gemini.generate_structured(
@@ -61,7 +63,7 @@ class GeminiService:
                     original_error="GOOGLE_API_KEY environment variable is empty",
                 )
             self._client = genai.Client(api_key=self.settings.GOOGLE_API_KEY)
-            logger.info(f"Initialized Gemini client with model: {self.settings.GEMINI_MODEL}")
+            logger.info("Initialized Gemini client with model: %s", self.settings.GEMINI_MODEL)
         return self._client
 
     def _get_generation_config(
@@ -75,22 +77,29 @@ class GeminiService:
             "max_output_tokens": max_tokens or self.settings.GEMINI_MAX_TOKENS,
         }
 
-    def _create_retry_decorator(self):
-        """Create a tenacity retry decorator with logging."""
-        return retry(
-            stop=stop_after_attempt(self.settings.GEMINI_MAX_RETRIES),
-            wait=wait_exponential(
-                multiplier=self.settings.GEMINI_RETRY_DELAY,
-                min=1,
-                max=60,
-            ),
-            retry=retry_if_exception_type((
-                ConnectionError,
-                TimeoutError,
-            )),
-            before_sleep=before_sleep_log(logger, logging.WARNING),
-            reraise=True,
-        )
+    def _get_retry_decorator(self):
+        """Return a cached tenacity retry decorator.
+
+        The decorator is built once and stored on the instance — rebuilding it
+        on every ``generate_with_retry`` call wastes CPU and creates a new
+        tenacity state machine each time, resetting retry statistics.
+        """
+        if not hasattr(self, "_retry_decorator"):
+            self._retry_decorator = retry(
+                stop=stop_after_attempt(self.settings.GEMINI_MAX_RETRIES),
+                wait=wait_exponential(
+                    multiplier=self.settings.GEMINI_RETRY_DELAY,
+                    min=1,
+                    max=60,
+                ),
+                retry=retry_if_exception_type((
+                    ConnectionError,
+                    TimeoutError,
+                )),
+                before_sleep=before_sleep_log(logger, logging.WARNING),
+                reraise=True,
+            )
+        return self._retry_decorator
 
     async def generate(
         self,
@@ -118,7 +127,7 @@ class GeminiService:
         try:
             config = self._get_generation_config(temperature, max_tokens)
 
-            logger.debug(f"Gemini request: {prompt[:200]}...")
+            logger.debug("Gemini request: %s...", prompt[:200])
 
             # Use new google.genai API
             response = await self.client.aio.models.generate_content(
@@ -128,19 +137,19 @@ class GeminiService:
             )
 
             elapsed_ms = (time.time() - start_time) * 1000
-            logger.info(f"Gemini response in {elapsed_ms:.2f}ms")
+            logger.info("Gemini response in %.2fms", elapsed_ms)
 
             return response.text
 
         except Exception as e:
             error_str = str(e).lower()
             if "blocked" in error_str or "safety" in error_str:
-                logger.error(f"Prompt blocked by Gemini safety filters: {e}")
+                logger.error("Prompt blocked by Gemini safety filters: %s", e)
                 raise AIServiceError(
                     message="Request blocked by AI safety filters",
                     original_error=str(e),
                 )
-            logger.error(f"Gemini API error: {e}")
+            logger.error("Gemini API error: %s", e)
             raise AIServiceError(
                 message="AI service temporarily unavailable",
                 original_error=str(e),
@@ -157,9 +166,7 @@ class GeminiService:
         
         Uses exponential backoff for transient failures.
         """
-        retry_decorator = self._create_retry_decorator()
-
-        @retry_decorator
+        @self._get_retry_decorator()
         async def _generate():
             return await self.generate(prompt, temperature, max_tokens)
 
@@ -217,8 +224,8 @@ class GeminiService:
         try:
             return json.loads(cleaned)
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON response: {e}")
-            logger.debug(f"Raw response: {response}")
+            logger.error("Failed to parse JSON response: %s", e)
+            logger.debug("Raw response: %s", response)
             raise ExtractionError(
                 message="Failed to parse AI response as JSON",
                 source="gemini",
@@ -252,19 +259,16 @@ class GeminiService:
         """
         start_time = time.time()
 
-
         try:
             config = self._get_generation_config(temperature, max_tokens)
 
             # Create the Part for the new google.genai API
-            from google.genai import types
-
-            image_part = types.Part.from_bytes(
+            image_part = genai_types.Part.from_bytes(
                 data=file_content,
-                mime_type=mime_type
+                mime_type=mime_type,
             )
 
-            logger.info(f"Gemini Vision request for {mime_type}")
+            logger.info("Gemini Vision request for %s", mime_type)
 
             # Use new google.genai API with multimodal content
             response = await self.client.aio.models.generate_content(
@@ -274,7 +278,7 @@ class GeminiService:
             )
 
             elapsed_ms = (time.time() - start_time) * 1000
-            logger.info(f"Gemini Vision response in {elapsed_ms:.2f}ms")
+            logger.info("Gemini Vision response in %.2fms", elapsed_ms)
 
             return self._parse_json_response(response.text)
 
@@ -283,19 +287,21 @@ class GeminiService:
         except Exception as e:
             error_str = str(e).lower()
             if "blocked" in error_str or "safety" in error_str:
-                logger.error(f"Vision prompt blocked: {e}")
+                logger.error("Vision prompt blocked: %s", e)
                 raise AIServiceError(
                     message="Document blocked by AI safety filters",
                     original_error=str(e),
                 )
-            logger.error(f"Gemini Vision error: {e}")
+            logger.error("Gemini Vision error: %s", e)
             raise AIServiceError(
                 message="AI vision service temporarily unavailable",
                 original_error=str(e),
             )
 
+
 # Singleton instance for dependency injection
 _gemini_service: GeminiService | None = None
+
 
 def get_gemini_service() -> GeminiService:
     """Get the global Gemini service instance."""
@@ -303,8 +309,3 @@ def get_gemini_service() -> GeminiService:
     if _gemini_service is None:
         _gemini_service = GeminiService()
     return _gemini_service
-
-def reset_gemini_service() -> None:
-    """Reset the singleton (for testing)."""
-    global _gemini_service
-    _gemini_service = None

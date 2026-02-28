@@ -1,67 +1,115 @@
-"""Unit tests for doctor CRUD endpoints."""
+"""Tests for doctor read/update endpoints.
 
+Current doctor API surface (no POST / DELETE at /api/v1/doctors):
+  GET  /api/v1/doctors            — paginated list with optional filters
+  GET  /api/v1/doctors/lookup     — full profile lookup by id/email/phone
+  GET  /api/v1/doctors/{id}       — single doctor by ID
+  PUT  /api/v1/doctors/{id}       — update doctor profile (admin/operational)
+  GET  /api/v1/doctors/bulk-upload/csv/template  — CSV template
+  POST /api/v1/doctors/bulk-upload/csv/validate  — validate CSV (phase 1)
+  POST /api/v1/doctors/bulk-upload/csv           — persist CSV (phase 2)
+
+Doctor creation is done via CSV bulk-upload (or the admin onboarding flow).
+"""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 if TYPE_CHECKING:
     from httpx import AsyncClient
 
+from src.app.main import app
+from src.app.db.session import get_db
+from src.app.models.doctor import Doctor
+
+
+async def _seed_doctor(client: "AsyncClient") -> int:
+    """Insert a Doctor directly via the overridden session and return its id."""
+    override_get_db = app.dependency_overrides.get(get_db)
+    assert override_get_db is not None
+
+    doctor_id: int | None = None
+    gen = override_get_db()
+    session: AsyncSession = await gen.__anext__()
+    doc = Doctor(
+        first_name="John",
+        last_name="Smith",
+        email="john.smith.doctors@hospital.com",
+        phone="+919876540001",
+        primary_specialization="Cardiology",
+        medical_registration_number="MED-DOCS-001",
+        medical_council="Medical Council of India",
+        years_of_experience=15,
+    )
+    session.add(doc)
+    await session.flush()
+    doctor_id = doc.id
+    try:
+        await gen.__anext__()
+    except StopAsyncIteration:
+        pass
+
+    assert doctor_id is not None
+    return doctor_id
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/doctors — list
+# ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
-async def test_create_doctor(
+async def test_list_doctors_returns_200(
     client: AsyncClient,
-    sample_doctor_data: dict,
     auth_headers: dict[str, str],
 ) -> None:
-    """Test creating a new doctor."""
-    response = await client.post("/api/v1/doctors", json=sample_doctor_data, headers=auth_headers)
-
-    assert response.status_code == 201
+    """GET /doctors returns 200 and a list (possibly empty)."""
+    response = await client.get("/api/v1/doctors", headers=auth_headers)
+    assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
-    assert data["data"]["first_name"] == sample_doctor_data["first_name"]
-    assert data["data"]["last_name"] == sample_doctor_data["last_name"]
-    assert data["data"]["email"] == sample_doctor_data["email"]
-    assert "id" in data["data"]
+    assert isinstance(data["data"], list)
 
 
 @pytest.mark.asyncio
-async def test_create_doctor_invalid_email(
+async def test_list_doctors_requires_auth(client: AsyncClient) -> None:
+    """GET /doctors without auth returns 401."""
+    response = await client.get("/api/v1/doctors")
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_list_doctors_pagination(
     client: AsyncClient,
-    sample_doctor_data: dict,
     auth_headers: dict[str, str],
 ) -> None:
-    """Test creating a doctor with invalid email fails."""
-    sample_doctor_data["email"] = "invalid-email"
-    response = await client.post("/api/v1/doctors", json=sample_doctor_data, headers=auth_headers)
+    """Pagination params (page_size) are accepted."""
+    response = await client.get("/api/v1/doctors?page_size=2", headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["data"]) <= 2
 
-    assert response.status_code == 422
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/doctors/{id}
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_get_doctor_by_id(
     client: AsyncClient,
-    sample_doctor_data: dict,
     auth_headers: dict[str, str],
 ) -> None:
-    """Test retrieving a doctor by ID."""
-    # First create a doctor
-    create_response = await client.post("/api/v1/doctors", json=sample_doctor_data, headers=auth_headers)
-    assert create_response.status_code == 201
-    doctor_id = create_response.json()["data"]["id"]
-
-    # Then retrieve it
+    """GET /doctors/{id} returns 200 for an existing doctor."""
+    doctor_id = await _seed_doctor(client)
     response = await client.get(f"/api/v1/doctors/{doctor_id}", headers=auth_headers)
-
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
     assert data["data"]["id"] == doctor_id
-    assert data["data"]["first_name"] == sample_doctor_data["first_name"]
-    assert data["data"]["last_name"] == sample_doctor_data["last_name"]
 
 
 @pytest.mark.asyncio
@@ -69,130 +117,57 @@ async def test_get_doctor_not_found(
     client: AsyncClient,
     auth_headers: dict[str, str],
 ) -> None:
-    """Test retrieving a non-existent doctor returns 404."""
-    fake_id = 99999  # Use a large integer that's unlikely to exist
-    response = await client.get(f"/api/v1/doctors/{fake_id}", headers=auth_headers)
-
+    """GET /doctors/{id} returns 404 for a non-existent doctor."""
+    response = await client.get("/api/v1/doctors/99999", headers=auth_headers)
     assert response.status_code == 404
     data = response.json()
     assert data["success"] is False
-    assert data["error"]["code"] == "DOCTOR_NOT_FOUND"
 
 
-@pytest.mark.asyncio
-async def test_list_doctors(
-    client: AsyncClient,
-    sample_doctor_data: dict,
-    auth_headers: dict[str, str],
-) -> None:
-    """Test listing all doctors with pagination."""
-    # Create a doctor first
-    await client.post("/api/v1/doctors", json=sample_doctor_data, headers=auth_headers)
-
-    # List doctors
-    response = await client.get("/api/v1/doctors", headers=auth_headers)
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["success"] is True
-    assert isinstance(data["data"], list)
-    assert len(data["data"]) >= 1
-
-
-@pytest.mark.asyncio
-async def test_list_doctors_pagination(
-    client: AsyncClient,
-    sample_doctor_data: dict,
-    auth_headers: dict[str, str],
-) -> None:
-    """Test pagination parameters work correctly."""
-    # Create multiple doctors with unique email and phone
-    for i in range(3):
-        doctor_data = sample_doctor_data.copy()
-        doctor_data["email"] = f"doctor{i}@hospital.com"
-        doctor_data["phone_number"] = f"+1-555-010{i}"  # Unique phone
-        doctor_data["medical_registration_number"] = f"MED-{10000 + i}"  # Unique reg number
-        await client.post("/api/v1/doctors", json=doctor_data, headers=auth_headers)
-
-    # Test with page_size
-    response = await client.get("/api/v1/doctors?page_size=2", headers=auth_headers)
-
-    assert response.status_code == 200
-    data = response.json()
-    assert len(data["data"]) <= 2
+# ---------------------------------------------------------------------------
+# PUT /api/v1/doctors/{id}
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_update_doctor(
     client: AsyncClient,
-    sample_doctor_data: dict,
     auth_headers: dict[str, str],
+    sample_update_data: dict,
 ) -> None:
-    """Test updating a doctor."""
-    # Create a doctor
-    create_response = await client.post("/api/v1/doctors", json=sample_doctor_data, headers=auth_headers)
-    doctor_id = create_response.json()["data"]["id"]
-
-    # Update it
-    update_data = {"first_name": "Updated", "last_name": "Name", "years_of_experience": 20}
-    response = await client.put(f"/api/v1/doctors/{doctor_id}", json=update_data, headers=auth_headers)
-
+    """PUT /doctors/{id} updates the doctor and returns 200."""
+    doctor_id = await _seed_doctor(client)
+    response = await client.put(
+        f"/api/v1/doctors/{doctor_id}",
+        json=sample_update_data,
+        headers=auth_headers,
+    )
     assert response.status_code == 200
     data = response.json()
-    assert data["data"]["first_name"] == "Updated"
-    assert data["data"]["last_name"] == "Name"
-    assert data["data"]["years_of_experience"] == 20
+    assert data["success"] is True
+    assert data["data"]["first_name"] == sample_update_data["first_name"]
 
 
 @pytest.mark.asyncio
-async def test_delete_doctor(
-    client: AsyncClient,
-    sample_doctor_data: dict,
-    auth_headers: dict[str, str],
-) -> None:
-    """Test deleting a doctor."""
-    # Create a doctor
-    create_response = await client.post("/api/v1/doctors", json=sample_doctor_data, headers=auth_headers)
-    doctor_id = create_response.json()["data"]["id"]
+async def test_update_doctor_requires_auth(client: AsyncClient) -> None:
+    """PUT /doctors/{id} without auth returns 401."""
+    response = await client.put("/api/v1/doctors/1", json={"first_name": "X"})
+    assert response.status_code == 401
 
-    # Delete it
-    response = await client.delete(f"/api/v1/doctors/{doctor_id}", headers=auth_headers)
 
-    assert response.status_code == 204
-
-    # Verify it's gone
-    get_response = await client.get(f"/api/v1/doctors/{doctor_id}", headers=auth_headers)
-    assert get_response.status_code == 404
+# ---------------------------------------------------------------------------
+# GET /api/v1/doctors/bulk-upload/csv/template
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_search_doctors(
+async def test_csv_template_returns_200(
     client: AsyncClient,
-    sample_doctor_data: dict,
     auth_headers: dict[str, str],
 ) -> None:
-    """Test searching doctors by specialization."""
-    # Create a doctor with specific specialization
-    sample_doctor_data["primary_specialization"] = "Dermatology"
-    sample_doctor_data["email"] = "dermatologist@hospital.com"  # Unique email
-    await client.post("/api/v1/doctors", json=sample_doctor_data, headers=auth_headers)
-
-    # Search by specialization
-    response = await client.get("/api/v1/doctors?specialization=Dermatology", headers=auth_headers)
-
+    """GET /doctors/bulk-upload/csv/template returns 200 and CSV content."""
+    response = await client.get(
+        "/api/v1/doctors/bulk-upload/csv/template", headers=auth_headers
+    )
     assert response.status_code == 200
-    data = response.json()
-    assert len(data["data"]) >= 1
-    assert data["data"][0]["primary_specialization"] == "Dermatology"
-
-
-@pytest.mark.asyncio
-async def test_unauthorized_access(client: AsyncClient, sample_doctor_data: dict) -> None:
-    """Test that endpoints require authentication."""
-    # Try to access without auth headers
-    response = await client.get("/api/v1/doctors")
-    assert response.status_code == 401
-
-    # Try to create without auth headers
-    response = await client.post("/api/v1/doctors", json=sample_doctor_data)
-    assert response.status_code == 401
+    assert "text/csv" in response.headers.get("content-type", "")

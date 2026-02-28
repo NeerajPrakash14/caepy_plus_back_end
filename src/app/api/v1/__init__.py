@@ -1,110 +1,105 @@
-"""API v1 package - Versioned API endpoints."""
+"""API v1 — versioned router.
 
+Router structure
+----------------
+PUBLIC (no auth):
+  /health            → health checks (liveness, readiness)
+  /auth/*            → OTP request/verify/resend + Google OAuth
+  /dropdowns         → GET all approved dropdown options
+  /dropdowns/{field} → GET approved options for one field
+
+AUTHENTICATED (require valid JWT):
+  /onboarding/*      → resume extraction, submit, verify, reject
+  /voice/*           → AI voice session (start, chat)
+  /doctors/*         → CRUD + lookup + CSV bulk upload
+  /dropdowns/submit  → propose a new dropdown value (→ PENDING)
+
+ADMIN (require authentication; RBAC enforced at endpoint level):
+  /onboarding-admin/*  → identity, details, media, status, doctor list/lookup
+  /admin/users/*       → user management (list, create, update)
+  /admin/dropdowns/*   → dropdown CRUD + approve / reject workflow
+"""
 from fastapi import APIRouter, Depends
 
-from ...core.rbac import require_admin, require_admin_or_operational
 from ...core.security import require_authentication
 from .endpoints import (
-	admin_dropdown,
-	admin_users,
-	auth,
-	blobs,
-	doctors,
-	dropdown_data,
-	health,
-	hospitals,
-	onboarding,
-	onboarding_admin,
-	otp,
-	testimonials,
-	voice,
-	voice_config,
+    admin_dropdowns,
+    admin_users,
+    doctors,
+    dropdowns,
+    health,
+    onboarding,
+    onboarding_admin,
+    otp,
+    voice,
 )
 
-# Create versioned router
 router = APIRouter(prefix="/api/v1")
 
-# Include endpoint routers (order matters for Swagger display)
+# =========================================================================
+# PUBLIC ENDPOINTS — no auth required
+# =========================================================================
 
-router.include_router(
-	health.router,
-	tags=["Health"],
-)
+# Health probes: liveness, readiness, comprehensive status
+router.include_router(health.router, tags=["Health"])
 
-# Testimonials - public endpoint for homepage carousel (no auth required)
-router.include_router(
-	testimonials.router,
-	tags=["Testimonials"],
-)
-
-# Regular authenticated endpoints
-router.include_router(
-	onboarding.router,
-	tags=["Onboarding"],
-	dependencies=[Depends(require_authentication)],
-)
-router.include_router(
-	dropdown_data.router,
-	tags=["Dropdown Data"],
-	dependencies=[Depends(require_authentication)],
-)
-router.include_router(
-	voice.router,
-	tags=["Voice Onboarding"],
-	dependencies=[Depends(require_authentication)],
-)
-router.include_router(
-	doctors.router,
-	tags=["Doctors"],
-	dependencies=[Depends(require_authentication)],
-)
-router.include_router(
-	hospitals.router,
-	tags=["Hospitals"],
-	dependencies=[Depends(require_authentication)],
-)
-router.include_router(
-	blobs.router,
-	tags=["Blob Storage"],
-	dependencies=[Depends(require_authentication)],
-)
-
-# =============================================================================
-# ADMIN ENDPOINTS (Require admin or operational role)
-# =============================================================================
-
-# Onboarding Admin - admin endpoint for managing doctor onboarding
-router.include_router(
-	onboarding_admin.router,
-	dependencies=[Depends(require_authentication)],
-)
-
-# Voice Config - admin endpoint for managing voice onboarding configuration
-router.include_router(
-	voice_config.router,
-	tags=["Voice Config Admin"],
-	dependencies=[Depends(require_admin_or_operational)],
-)
-
-# Admin Dropdown Options - manage dropdown/multi-select field values
-router.include_router(
-	admin_dropdown.router,
-	tags=["Admin - Dropdown Options"],
-	dependencies=[Depends(require_admin_or_operational)],
-)
-
-# Admin User Management - RBAC user administration (admin only)
-router.include_router(
-	admin_users.router,
-	tags=["Admin - User Management"],
-	# Note: RBAC is enforced at endpoint level via AdminUser dependency
-)
-
-# =============================================================================
-# PUBLIC ENDPOINTS (No auth required)
-# =============================================================================
-
-# Auth/OTP endpoints remain publicly accessible so clients can obtain tokens
-router.include_router(auth.router, tags=["Authentication"])
+# Authentication: OTP request/verify/resend, admin OTP, Google OAuth
 router.include_router(otp.router, tags=["Authentication"])
 
+# Dropdown public read: approved options visible to everyone (no login needed).
+# NOTE: /dropdowns/submit (POST) is protected — the router itself handles
+# the auth check per-endpoint so no router-level dependency here.
+router.include_router(dropdowns.router, tags=["Dropdowns"])
+
+# =========================================================================
+# AUTHENTICATED ENDPOINTS — require valid JWT
+# =========================================================================
+
+router.include_router(
+    onboarding.router,
+    tags=["Onboarding"],
+    dependencies=[Depends(require_authentication)],
+)
+
+router.include_router(
+    voice.router,
+    tags=["Voice Onboarding"],
+    dependencies=[Depends(require_authentication)],
+)
+
+router.include_router(
+    doctors.router,
+    tags=["Doctors"],
+    dependencies=[Depends(require_authentication)],
+)
+
+# =========================================================================
+# ADMIN ENDPOINTS — require auth; role enforcement is per-endpoint
+# =========================================================================
+
+# Onboarding admin: full doctor onboarding CRUD + lookup
+router.include_router(
+    onboarding_admin.router,
+    dependencies=[Depends(require_authentication)],
+)
+
+# Admin user management: list / create / update admin & operational users.
+#
+# !! NO router-level auth dependency here — intentional !!
+# The /admin/users/seed endpoint is a public bootstrap route (self-disabling
+# once an admin exists) and cannot carry a router-level auth dependency.
+# Every other endpoint in admin_users.router MUST individually declare an
+# AdminUser or AdminOrOperationalUser dependency — code-review this invariant
+# on every future change to that module.
+router.include_router(
+    admin_users.router,
+    tags=["Admin - User Management"],
+)
+
+# Admin dropdown management: CRUD + approve / reject user submissions.
+# All endpoints in admin_dropdowns declare AdminOrOperationalUser dependency.
+router.include_router(
+    admin_dropdowns.router,
+    dependencies=[Depends(require_authentication)],
+    tags=["Admin - Dropdowns"],
+)

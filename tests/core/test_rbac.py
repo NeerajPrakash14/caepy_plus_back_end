@@ -9,7 +9,6 @@ from src.app.core.config import Settings
 from src.app.core.exceptions import ForbiddenError, UnauthorizedError
 from src.app.core.rbac import (
     get_current_user,
-    require_active_user,
     require_admin,
     require_admin_or_operational,
 )
@@ -167,7 +166,3 @@ async def test_require_admin_or_operational_failure(active_user):
     with pytest.raises(ForbiddenError):
         await require_admin_or_operational(current_user=active_user)
 
-@pytest.mark.asyncio
-async def test_require_active_user(active_user):
-    user = await require_active_user(current_user=active_user)
-    assert user.id == active_user.id

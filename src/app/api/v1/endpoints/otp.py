@@ -1,19 +1,31 @@
-"""Authentication Endpoints for OTP-based login.
+"""Authentication Endpoints for OTP-based login and Google Sign-In.
 
 Provides endpoints for:
-- POST /auth/otp/request - Request OTP for mobile number
-- POST /auth/otp/verify - Verify OTP and login
+- POST /auth/otp/request      - Request OTP for mobile number
+- POST /auth/otp/verify       - Verify OTP and login (doctor flow)
+- POST /auth/otp/resend       - Resend OTP
+- POST /auth/admin/otp/verify - Admin-only OTP verify (no auto-create)
+- POST /auth/google/verify    - Google OAuth sign-in via Firebase
 """
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.app.core.config import Settings, get_settings
-from src.app.db.session import get_db
-from src.app.repositories.doctor_repository import DoctorRepository
-from src.app.repositories.user_repository import UserRepository
-from src.app.schemas.auth import (
+from ....core.config import Settings, get_settings
+from ....db.session import get_db
+from ....models.enums import UserRole
+from ....repositories.doctor_repository import DoctorRepository
+from ....repositories.user_repository import UserRepository
+from ....schemas.auth import (
     GoogleAuthSchema,
     OTPErrorResponse,
     OTPRequestResponse,
@@ -21,64 +33,114 @@ from src.app.schemas.auth import (
     OTPVerifyResponse,
     OTPVerifySchema,
 )
-from src.app.services.otp_service import OTPService, get_otp_service
-
-from .auth import _create_access_token
+from ....services.otp_service import OTPService, get_otp_service
 
 logger = structlog.get_logger(__name__)
 
+# Roles permitted to use the admin OTP endpoint
+_ADMIN_ROLES: frozenset[str] = frozenset({UserRole.ADMIN.value, UserRole.OPERATIONAL.value})
+
+
+# ---------------------------------------------------------------------------
+# JWT helpers (HS256, stdlib only — no external jwt library required)
+# ---------------------------------------------------------------------------
+
+class TokenResponse(BaseModel):
+    """JWT access token response payload."""
+
+    access_token: str = Field(..., description="JWT access token")
+    token_type: str = Field(default="bearer", description="Token type, always 'bearer'")
+    expires_in: int = Field(..., description="Token expiration time in seconds")
+
+
+def _base64url_encode(data: bytes) -> str:
+    """Encode bytes using base64 URL-safe encoding without padding."""
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _encode_jwt(payload: dict, *, secret: str, algorithm: str = "HS256") -> str:
+    """Minimal HS256 JWT encoder using only the standard library."""
+    if algorithm != "HS256":
+        raise ValueError("Only HS256 algorithm is supported")
+
+    header = {"alg": algorithm, "typ": "JWT"}
+    header_json = json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+
+    encoded_header = _base64url_encode(header_json)
+    encoded_payload = _base64url_encode(payload_json)
+
+    signing_input = f"{encoded_header}.{encoded_payload}".encode("ascii")
+    signature = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
+    encoded_signature = _base64url_encode(signature)
+
+    return f"{encoded_header}.{encoded_payload}.{encoded_signature}"
+
+
+def _create_access_token(
+    *,
+    subject: str,
+    settings: Settings,
+    doctor_id: int | None = None,
+    email: str | None = None,
+    role: str = "user",
+) -> TokenResponse:
+    """Create a signed JWT access token with user claims."""
+    now = datetime.now(UTC)
+    expire_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = now + expire_delta
+
+    to_encode = {
+        "sub": subject,
+        "iat": int(now.timestamp()),
+        "exp": int(expire.timestamp()),
+        "doctor_id": doctor_id,
+        "phone": subject,
+        "email": email,
+        "role": role,
+    }
+
+    encoded_jwt = _encode_jwt(to_encode, secret=settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+    return TokenResponse(
+        access_token=encoded_jwt,
+        token_type="bearer",
+        expires_in=int(expire_delta.total_seconds()),
+    )
+
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/otp/request
+# ---------------------------------------------------------------------------
 
 @router.post(
     "/otp/request",
     response_model=OTPRequestResponse,
     status_code=status.HTTP_200_OK,
     summary="Request OTP",
-    description="Send OTP to the provided mobile number for authentication.",
+    description="Send a 6-digit OTP to the provided mobile number for authentication.",
     responses={
-        200: {
-            "description": "OTP sent successfully",
-            "model": OTPRequestResponse,
-        },
-        400: {
-            "description": "Invalid mobile number",
-            "model": OTPErrorResponse,
-        },
-        500: {
-            "description": "Failed to send OTP",
-            "model": OTPErrorResponse,
-        },
+        200: {"description": "OTP sent successfully", "model": OTPRequestResponse},
+        500: {"description": "Failed to send OTP", "model": OTPErrorResponse},
     },
 )
 async def request_otp(
     request: OTPRequestSchema,
     otp_service: OTPService = Depends(get_otp_service),
 ) -> OTPRequestResponse:
-    """Request OTP for mobile number.
+    """Send OTP to mobile number.
 
-    Sends a 6-digit OTP to the provided mobile number via SMS.
-    OTP is valid for a limited time as per settings.
-
-    **Request Body:**
-    - `mobile_number`: 10-digit Indian mobile number (with or without +91 prefix)
-
-    **Returns:**
-    - Success status
-    - Masked mobile number
-    - OTP validity period
+    Sends a 6-digit OTP via SMS. OTP is valid for the duration
+    configured via ``OTP_EXPIRY_SECONDS``.
     """
-    logger.info(
-        "OTP request received",
-        mobile=otp_service.mask_mobile(request.mobile_number),
-    )
+    logger.info("OTP request received", mobile=otp_service.mask_mobile(request.mobile_number))
 
     success, message = await otp_service.send_otp(request.mobile_number)
 
     if not success:
-        logger.warning(
-            "OTP send failed",
-            mobile=otp_service.mask_mobile(request.mobile_number),
-        )
+        logger.warning("OTP send failed", mobile=otp_service.mask_mobile(request.mobile_number))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
@@ -95,25 +157,23 @@ async def request_otp(
         expires_in_seconds=otp_service.settings.OTP_EXPIRY_SECONDS,
     )
 
+
+# ---------------------------------------------------------------------------
+# POST /auth/otp/verify
+# ---------------------------------------------------------------------------
+
 @router.post(
     "/otp/verify",
     response_model=OTPVerifyResponse,
     status_code=status.HTTP_200_OK,
-    summary="Verify OTP",
-    description="Verify the OTP and authenticate the user.",
+    summary="Verify OTP (Doctor)",
+    description=(
+        "Verify OTP and authenticate a doctor. Creates a new doctor record "
+        "if the mobile number is not yet registered."
+    ),
     responses={
-        200: {
-            "description": "OTP verified successfully",
-            "model": OTPVerifyResponse,
-        },
-        400: {
-            "description": "Invalid or expired OTP",
-            "model": OTPErrorResponse,
-        },
-        401: {
-            "description": "OTP verification failed",
-            "model": OTPErrorResponse,
-        },
+        200: {"description": "OTP verified successfully", "model": OTPVerifyResponse},
+        401: {"description": "Invalid or expired OTP", "model": OTPErrorResponse},
     },
 )
 async def verify_otp(
@@ -122,43 +182,13 @@ async def verify_otp(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> OTPVerifyResponse:
-    """Verify OTP and authenticate user.
+    """Verify OTP and return a JWT for the doctor."""
+    logger.info("OTP verify request", mobile=otp_service.mask_mobile(request.mobile_number))
 
-    Verifies the OTP sent to the mobile number. If verification is successful:
-    1. Checks if a doctor record exists with this mobile number
-    2. If exists: Returns JWT with doctor's ID, phone, email, role
-    3. If new: Creates a new doctor record with phone number and default role
-    4. Returns JWT token for subsequent authenticated requests
-
-    **Request Body:**
-    - `mobile_number`: 10-digit Indian mobile number
-    - `otp`: 6-digit OTP code received via SMS
-
-    **Returns:**
-    - Success status
-    - Doctor ID (existing or newly created)
-    - Whether this is a new user
-    - Verified mobile number
-    - JWT access token with claims (doctor_id, phone, email, role)
-    """
-    logger.info(
-        "OTP verify request",
-        mobile=otp_service.mask_mobile(request.mobile_number),
-    )
-
-    # Verify OTP
-    is_valid, message = await otp_service.verify_otp(
-        request.mobile_number, request.otp
-    )
+    # 1. Verify OTP — always enforce real OTP check
+    is_valid, message = await otp_service.verify_otp(request.mobile_number, request.otp)
 
     if not is_valid:
-        logger.warning(
-            "OTP verification failed",
-            mobile=otp_service.mask_mobile(request.mobile_number),
-            reason=message,
-        )
-
-        # Determine error code based on message
         error_code = "INVALID_OTP"
         if "expired" in message.lower():
             error_code = "OTP_EXPIRED"
@@ -167,24 +197,23 @@ async def verify_otp(
         elif "not found" in message.lower():
             error_code = "OTP_NOT_FOUND"
 
+        logger.warning(
+            "OTP verification failed",
+            mobile=otp_service.mask_mobile(request.mobile_number),
+            reason=message,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "success": False,
-                "message": message,
-                "error_code": error_code,
-            },
+            detail={"success": False, "message": message, "error_code": error_code},
         )
 
-    # Check if doctor exists with this mobile number
+    # 2. Find or auto-create doctor
     doctor_repo = DoctorRepository(db)
     user_repo = UserRepository(db)
     doctor = await doctor_repo.get_by_phone_number(request.mobile_number)
-
     is_new_user = doctor is None
 
     if is_new_user:
-        # Create new doctor record with phone number and default role
         doctor = await doctor_repo.create_from_phone(
             phone_number=request.mobile_number,
             role="user",
@@ -195,17 +224,14 @@ async def verify_otp(
             mobile=otp_service.mask_mobile(request.mobile_number),
         )
 
-    # Get doctor details for JWT claims
     doctor_id = doctor.id
-    doctor_email = doctor.email if doctor.email else None
+    doctor_email = doctor.email
 
-    # Get or create user record - role is stored ONLY in users table
+    # 3. Resolve role from users table (single source of truth for RBAC)
     existing_user = await user_repo.get_by_phone(request.mobile_number)
     if existing_user:
-        # Use role from existing user record (single source of truth)
-        user_role = existing_user.role if existing_user.role else "user"
+        user_role = existing_user.role or "user"
     else:
-        # Create new user with default role
         user_role = "user"
         try:
             await user_repo.create(
@@ -215,19 +241,11 @@ async def verify_otp(
                 is_active=True,
                 doctor_id=doctor_id,
             )
-            logger.info(
-                "Created user record for RBAC",
-                doctor_id=doctor_id,
-                mobile=otp_service.mask_mobile(request.mobile_number),
-            )
-        except Exception as e:
-            # User might already exist due to race condition
-            logger.warning(
-                "Failed to create user record (may already exist)",
-                error=str(e),
-            )
+        except Exception as exc:
+            # Tolerate race-condition duplicates; role is already "user"
+            logger.warning("User record creation skipped (may already exist)", error=str(exc))
 
-    # Create JWT access token with full claims
+    # 4. Issue JWT
     token = _create_access_token(
         subject=request.mobile_number,
         settings=settings,
@@ -256,60 +274,35 @@ async def verify_otp(
         expires_in=token.expires_in,
     )
 
+
+# ---------------------------------------------------------------------------
+# POST /auth/otp/resend
+# ---------------------------------------------------------------------------
+
 @router.post(
     "/otp/resend",
     response_model=OTPRequestResponse,
     status_code=status.HTTP_200_OK,
     summary="Resend OTP",
-    description="Resend OTP to the same mobile number (invalidates previous OTP).",
+    description="Generate a new OTP and resend it. Invalidates any previously issued OTP.",
     responses={
-        200: {
-            "description": "OTP resent successfully",
-            "model": OTPRequestResponse,
-        },
-        400: {
-            "description": "Invalid mobile number",
-            "model": OTPErrorResponse,
-        },
-        429: {
-            "description": "Too many requests",
-            "model": OTPErrorResponse,
-        },
+        200: {"description": "OTP resent successfully", "model": OTPRequestResponse},
+        500: {"description": "Failed to resend OTP", "model": OTPErrorResponse},
     },
 )
 async def resend_otp(
     request: OTPRequestSchema,
     otp_service: OTPService = Depends(get_otp_service),
 ) -> OTPRequestResponse:
-    """Resend OTP to mobile number.
+    """Resend (regenerate) OTP to the same mobile number."""
+    logger.info("OTP resend request", mobile=otp_service.mask_mobile(request.mobile_number))
 
-    Generates a new OTP and sends it to the mobile number.
-    Previous OTP is invalidated.
-
-    **Request Body:**
-    - `mobile_number`: 10-digit Indian mobile number
-
-    **Returns:**
-    - Success status
-    - Masked mobile number
-    - OTP validity period
-    """
-    logger.info(
-        "OTP resend request",
-        mobile=otp_service.mask_mobile(request.mobile_number),
-    )
-
-    # Same as request_otp - sends new OTP (previous one is overwritten)
     success, message = await otp_service.send_otp(request.mobile_number)
 
     if not success:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "success": False,
-                "message": message,
-                "error_code": "OTP_SEND_FAILED",
-            },
+            detail={"success": False, "message": message, "error_code": "OTP_SEND_FAILED"},
         )
 
     return OTPRequestResponse(
@@ -320,6 +313,10 @@ async def resend_otp(
     )
 
 
+# ---------------------------------------------------------------------------
+# POST /auth/admin/otp/verify
+# ---------------------------------------------------------------------------
+
 @router.post(
     "/admin/otp/verify",
     response_model=OTPVerifyResponse,
@@ -327,22 +324,13 @@ async def resend_otp(
     summary="Verify Admin OTP",
     description=(
         "Verify OTP for admin/operational users. "
-        "Strictly enforces RBAC: user must exist and have admin/operational role. "
-        "Does NOT auto-create users."
+        "Strict RBAC: user must already exist with admin or operational role. "
+        "New users are NEVER auto-created via this endpoint."
     ),
     responses={
-        200: {
-            "description": "Admin OTP verified successfully",
-            "model": OTPVerifyResponse,
-        },
-        400: {
-            "description": "Invalid/Expired OTP",
-            "model": OTPErrorResponse,
-        },
-        403: {
-            "description": "Forbidden (Non-admin or Unknown user)",
-            "model": OTPErrorResponse,
-        },
+        200: {"description": "Admin OTP verified successfully", "model": OTPVerifyResponse},
+        400: {"description": "Invalid / Expired OTP", "model": OTPErrorResponse},
+        403: {"description": "Access denied (user not found or insufficient role)", "model": OTPErrorResponse},
     },
 )
 async def verify_admin_otp(
@@ -351,22 +339,15 @@ async def verify_admin_otp(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> OTPVerifyResponse:
-    """Verify OTP and authenticate admin user."""
-    from ....models.enums import UserRole
+    """Verify OTP and authenticate a pre-registered admin or operational user.
 
-    logger.info(
-        "Admin OTP verify request",
-        mobile=otp_service.mask_mobile(request.mobile_number),
-    )
+    No user creation occurs here — the user must already exist in the ``users``
+    table with ``admin`` or ``operational`` role.
+    """
+    logger.info("Admin OTP verify request", mobile=otp_service.mask_mobile(request.mobile_number))
 
-    # 1. Verify OTP
-    # is_valid, message = await otp_service.verify_otp(
-    #     request.mobile_number, request.otp
-    # )
-
-    # Bypass OTP verification for now (MIMIC MODE)
-    is_valid = True
-    message = "OTP verified successfully (MIMIC)"
+    # 1. Verify OTP — no bypass, always enforce real OTP verification
+    is_valid, message = await otp_service.verify_otp(request.mobile_number, request.otp)
 
     if not is_valid:
         logger.warning(
@@ -376,20 +357,16 @@ async def verify_admin_otp(
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "success": False,
-                "message": message,
-                "error_code": "INVALID_OTP",
-            },
+            detail={"success": False, "message": message, "error_code": "INVALID_OTP"},
         )
 
-    # 2. Check if User exists (Strict Check)
+    # 2. Strict user existence check — admins must be pre-provisioned
     user_repo = UserRepository(db)
     user = await user_repo.get_by_phone(request.mobile_number)
 
     if not user:
         logger.warning(
-            "Admin login failed: User not found",
+            "Admin login failed: user not found",
             mobile=otp_service.mask_mobile(request.mobile_number),
         )
         raise HTTPException(
@@ -401,11 +378,10 @@ async def verify_admin_otp(
             },
         )
 
-    # 3. Check Role (Strict RBAC)
-    allowed_roles = (UserRole.ADMIN.value, UserRole.OPERATIONAL.value)
-    if user.role not in allowed_roles:
+    # 3. RBAC — only admin and operational roles are permitted
+    if user.role not in _ADMIN_ROLES:
         logger.warning(
-            "Admin login failed: Insufficient permissions",
+            "Admin login failed: insufficient role",
             user_id=user.id,
             role=user.role,
         )
@@ -418,18 +394,18 @@ async def verify_admin_otp(
             },
         )
 
-    # 4. Check Active Status
+    # 4. Active account check
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
                 "success": False,
-                "message": "Account is inactive.",
+                "message": "Account is inactive. Contact your administrator.",
                 "error_code": "USER_INACTIVE",
             },
         )
 
-    # 5. Generate Token
+    # 5. Issue JWT
     token = _create_access_token(
         subject=user.phone,
         settings=settings,
@@ -438,17 +414,13 @@ async def verify_admin_otp(
         role=user.role,
     )
 
-    logger.info(
-        "Admin verified successfully",
-        user_id=user.id,
-        role=user.role,
-    )
+    logger.info("Admin OTP verified successfully", user_id=user.id, role=user.role)
 
     return OTPVerifyResponse(
         success=True,
         message="Admin verified successfully",
-        doctor_id=user.doctor_id, # Can be None if not linked to doctor
-        is_new_user=False, # Admins are never "new" via this endpoint
+        doctor_id=user.doctor_id,  # May be None if not linked to a doctor record
+        is_new_user=False,
         mobile_number=user.phone,
         role=user.role,
         access_token=token.access_token,
@@ -457,25 +429,23 @@ async def verify_admin_otp(
     )
 
 
+# ---------------------------------------------------------------------------
+# POST /auth/google/verify
+# ---------------------------------------------------------------------------
+
 @router.post(
     "/google/verify",
     response_model=OTPVerifyResponse,
     status_code=status.HTTP_200_OK,
     summary="Google Sign-In",
     description=(
-        "Verify Firebase ID token from Google Sign-In and authenticate user. "
-        "Creates a new doctor record if the email is not found. "
-        "No OTP step is required."
+        "Verify a Firebase ID token obtained from Google Sign-In. "
+        "Finds or creates the doctor record by email. No OTP step is required."
     ),
     responses={
-        200: {
-            "description": "Google Sign-In successful",
-            "model": OTPVerifyResponse,
-        },
-        401: {
-            "description": "Invalid Firebase token",
-            "model": OTPErrorResponse,
-        },
+        200: {"description": "Google Sign-In successful", "model": OTPVerifyResponse},
+        400: {"description": "No email in Google account", "model": OTPErrorResponse},
+        401: {"description": "Invalid Firebase token", "model": OTPErrorResponse},
     },
 )
 async def google_verify(
@@ -483,37 +453,36 @@ async def google_verify(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> OTPVerifyResponse:
-    """Verify Google Sign-In and authenticate/register user.
+    """Verify Google Sign-In Firebase token and return a JWT.
 
     Flow:
-    1. Verify Firebase ID token server-side
-    2. Extract email and name from decoded token
-    3. Find or create doctor record by email
-    4. Find or create user record
-    5. Generate JWT access token
-    6. Return same response shape as /otp/verify
+        1. Verify Firebase ID token server-side.
+        2. Extract ``email`` and ``name`` from the decoded token payload.
+        3. Find or create a doctor record keyed on the email address.
+        4. Find or create a user record (RBAC) keyed on the email address.
+        5. Issue and return a JWT access token.
     """
-    from src.app.core.firebase_config import verify_firebase_token
+    from ....core.firebase_config import verify_firebase_token
 
     logger.info("Google Sign-In verify request received")
 
-    # 1. Verify Firebase ID token
+    # 1. Verify Firebase ID token (async — must be awaited)
     try:
-        decoded_token = verify_firebase_token(request.id_token)
-    except ValueError as e:
-        logger.warning("Google Sign-In: invalid token", error=str(e))
+        decoded_token = await verify_firebase_token(request.id_token)
+    except ValueError as exc:
+        logger.warning("Google Sign-In: invalid token", error=str(exc))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={
                 "success": False,
-                "message": str(e),
+                "message": str(exc),
                 "error_code": "INVALID_FIREBASE_TOKEN",
             },
         )
 
-    # 2. Extract user info from decoded token
-    google_email = decoded_token.get("email")
-    google_name = decoded_token.get("name", "")
+    # 2. Extract claims
+    google_email: str | None = decoded_token.get("email")
+    google_name: str = decoded_token.get("name", "")
 
     if not google_email:
         raise HTTPException(
@@ -527,11 +496,10 @@ async def google_verify(
 
     logger.info("Google Sign-In: token decoded", email=google_email, name=google_name)
 
-    # 3. Find or create doctor by email
+    # 3. Find or create doctor
     doctor_repo = DoctorRepository(db)
     user_repo = UserRepository(db)
     doctor = await doctor_repo.get_by_email(google_email)
-
     is_new_user = doctor is None
 
     if is_new_user:
@@ -540,42 +508,34 @@ async def google_verify(
             name=google_name,
             role="user",
         )
-        logger.info(
-            "Created new doctor from Google Sign-In",
-            doctor_id=doctor.id,
-            email=google_email,
-        )
+        logger.info("Created new doctor from Google Sign-In", doctor_id=doctor.id, email=google_email)
 
-    # 4. Get doctor details for JWT
     doctor_id = doctor.id
-    doctor_phone = doctor.phone if doctor.phone else ""
+    doctor_phone: str | None = doctor.phone or None
 
-    # 5. Get or create user record
+    # 4. Find or create user record (RBAC)
+    # For Google users without a phone we use the email as the unique lookup key.
     existing_user = await user_repo.get_by_email(google_email)
     if existing_user:
-        user_role = existing_user.role if existing_user.role else "user"
+        user_role = existing_user.role or "user"
     else:
         user_role = "user"
+        # Only pass phone if we actually have a real one; otherwise leave it as
+        # None so the unique constraint on phone is not violated by a
+        # placeholder value that could collide across multiple Google users.
         try:
             await user_repo.create(
-                phone=doctor_phone or "google_user",
+                phone=doctor_phone,
                 email=google_email,
                 role=user_role,
                 is_active=True,
                 doctor_id=doctor_id,
             )
-            logger.info(
-                "Created user record for Google Sign-In",
-                doctor_id=doctor_id,
-                email=google_email,
-            )
-        except Exception as e:
-            logger.warning(
-                "Failed to create user record (may already exist)",
-                error=str(e),
-            )
+        except Exception as exc:
+            # Tolerate duplicate-key races; role resolved above remains "user"
+            logger.warning("User record creation skipped (may already exist)", error=str(exc))
 
-    # 6. Create JWT access token
+    # 5. Issue JWT — use email as subject for Google users
     token = _create_access_token(
         subject=google_email,
         settings=settings,
@@ -596,7 +556,7 @@ async def google_verify(
         message="Google Sign-In successful",
         doctor_id=doctor_id,
         is_new_user=is_new_user,
-        mobile_number=doctor_phone,
+        mobile_number=doctor_phone or "",
         role=user_role,
         access_token=token.access_token,
         token_type=token.token_type,

@@ -1,102 +1,128 @@
-import requests
+#!/usr/bin/env python3
+# ============================================================
+# DEV-ONLY LOCAL SCRIPT — DO NOT SHIP TO PRODUCTION
+# ============================================================
+# This file is intentionally excluded from the production image
+# via .gitignore (see entry: verify_skip_fields.py).
+#
+# Purpose : Manual smoke-test for voice session field-skipping behaviour.
+# Audience: Local development only — run against a local server + live DB.
+#
+# NOTE: The /validateandlogin endpoint referenced in older drafts of this
+#       script has been removed. Authentication is now handled exclusively
+#       via POST /api/v1/auth/otp/verify. Obtain a JWT from that endpoint
+#       and pass it via the TOKEN env var below.
+#
+# NOTE: +919999999999 is a local dev placeholder only. Never substitute
+#       real patient/doctor phone numbers here.
+#
+# Usage:
+#   # 1. Start the server:       uvicorn src.app.main:app --reload
+#   # 2. Set up a dev user:      python setup_test_user.py +919999999999
+#   # 3. Get an OTP token first, then pass it here:
+#   #        TOKEN=<jwt> python verify_skip_fields.py
+# ============================================================
+from __future__ import annotations
+
 import json
-import time
+import os
 import sys
 
-BASE_URL = "http://localhost:8000/api/v1/voice"
-AUTH_URL = "http://localhost:8000/api/v1"
+# ----- Production guard: fail fast if accidentally run in prod -----
+if os.environ.get("APP_ENV", "development").lower() == "production":
+    print(
+        "ERROR: verify_skip_fields.py must not run in production (APP_ENV=production).",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+# -------------------------------------------------------------------
 
-# Context for testing - must include email/phone to test skipping
+import requests
+
+BASE_URL = "http://localhost:8000/api/v1/voice"
+AUTH_URL = "http://localhost:8000/api/v1/auth"
+
+# Context for testing — must include email/phone to test field-skipping
 context = {
     "fields": [
-        {"key": "fullName", "label": "Full Name", "description": "Your name", "required": True},
-        {"key": "email", "label": "Email", "description": "Your email address", "required": True},
-        {"key": "phone", "label": "Phone Number", "description": "Your phone number", "required": True},
-        {"key": "specialty", "label": "Specialty", "description": "Your specialty", "required": True}
+        {"key": "fullName",  "label": "Full Name",    "description": "Your name",         "required": True},
+        {"key": "email",     "label": "Email",         "description": "Your email address", "required": True},
+        {"key": "phone",     "label": "Phone Number",  "description": "Your phone number",  "required": True},
+        {"key": "specialty", "label": "Specialty",     "description": "Your specialty",     "required": True},
     ]
 }
 
-def verify():
-    print("Waiting for server...")
-    time.sleep(2)
 
-    # 1. Authenticate with the user we just set up
-    print("Authenticating...")
-    auth_payload = {"phone_number": "9999999999", "otp": "123456"}
-    auth_resp = requests.post(f"{AUTH_URL}/validateandlogin", json=auth_payload)
-    
-    if auth_resp.status_code != 200:
-        print(f"Authentication failed: {auth_resp.text}")
+def _get_token() -> str:
+    """Return JWT from TOKEN env var or fail with clear instructions."""
+    token = os.environ.get("TOKEN", "").strip()
+    if not token:
+        print(
+            "ERROR: TOKEN env var not set.\n"
+            "Obtain a token via POST /api/v1/auth/otp/verify, then:\n"
+            "    TOKEN=<jwt> python verify_skip_fields.py",
+            file=sys.stderr,
+        )
         sys.exit(1)
-        
-    token = auth_resp.json()["data"]["access_token"]
+    return token
+
+
+def verify() -> None:
+    token = _get_token()
     headers = {"Authorization": f"Bearer {token}"}
-    print("Authentication successful.")
 
-    # 2. Start Session
-    print(f"Starting session with context...")
-    resp = requests.post(f"{BASE_URL}/start", json={"language": "en", "context": context}, headers=headers)
-    
+    # 1. Start Session
+    print("Starting voice session with test context...")
+    resp = requests.post(
+        f"{BASE_URL}/start",
+        json={"language": "en", "context": context},
+        headers=headers,
+    )
     if resp.status_code != 201:
-        print(f"Start Status: {resp.status_code}")
-        print(f"Error: {resp.text}")
+        print(f"Start failed [{resp.status_code}]: {resp.text}", file=sys.stderr)
         sys.exit(1)
-        
-    data = resp.json()
-    session_id = data["session_id"]
+
+    session_id = resp.json()["session_id"]
     print(f"Session ID: {session_id}")
 
-    # 3. Verify Initial State
-    # Check session status
+    # 2. Check initial field state
     status_resp = requests.get(f"{BASE_URL}/session/{session_id}", headers=headers)
     status_data = status_resp.json()
-    
+
     fields_status = status_data["fields_status"]
     current_data = status_data["current_data"]
-    
     print("\nCurrent Data:", json.dumps(current_data, indent=2))
-    
-    # Check if email and phone are collected
+
     email_collected = any(f["field_name"] == "email" and f["is_collected"] for f in fields_status)
     phone_collected = any(f["field_name"] == "phone" and f["is_collected"] for f in fields_status)
-    
-    if not email_collected and phone_collected:
-        print("SUCCESS: Phone is marked as collected, Email is NOT (as requested).")
-    else:
-        print(f"FAILURE: Email collected: {email_collected}, Phone collected: {phone_collected}")
-        sys.exit(1)
-        
-    # Check values match (lenient phone check)
-    # Email should NOT be here initially anymore because we want the AI to ask for it.
-    if "9999999999" in current_data.get("phone", ""):
-        print("SUCCESS: Phone matches user profile.")
-    else:
-         print(f"FAILURE: Phone does not match. Phone: {current_data.get('phone')}")
-         sys.exit(1)
 
-    # 4. Chat Interaction - Verify flow
-    print("\nSending Chat: 'My name is Dr. Neeraj'")
-    chat_resp = requests.post(f"{BASE_URL}/chat", json={
-        "session_id": session_id,
-        "user_transcript": "My name is Dr. Neeraj",
-        "context": context
-    }, headers=headers)
-    
+    if phone_collected and not email_collected:
+        print("PASS: Phone pre-collected, Email not yet collected.")
+    else:
+        print(f"FAIL: email_collected={email_collected}, phone_collected={phone_collected}", file=sys.stderr)
+        sys.exit(1)
+
+    # 3. Chat interaction
+    print("\nSending: 'My name is Dr. Neeraj'")
+    chat_resp = requests.post(
+        f"{BASE_URL}/chat",
+        json={"session_id": session_id, "user_transcript": "My name is Dr. Neeraj", "context": context},
+        headers=headers,
+    )
     if chat_resp.status_code != 200:
-        print(f"Chat Error: {chat_resp.text}")
+        print(f"Chat error [{chat_resp.status_code}]: {chat_resp.text}", file=sys.stderr)
         sys.exit(1)
 
-    chat_data = chat_resp.json()
-    ai_response = chat_data["ai_response"]
+    ai_response = chat_resp.json()["ai_response"]
     print(f"AI Response: {ai_response}")
-    
-    # AI should NOT ask for phone, but SHOULD ask for email.
-    if "email" in ai_response.lower():
-        print("SUCCESS: AI asked for email.")
-    if "phone" in ai_response.lower():
-        print("WARNING: AI might be asking for phone. Check response.")
 
-    print("\nVerification passed!")
+    if "email" in ai_response.lower():
+        print("PASS: AI asked for email.")
+    if "phone" in ai_response.lower():
+        print("WARN: AI mentioned phone — check if it is asking or confirming.")
+
+    print("\nSmoke test passed.")
+
 
 if __name__ == "__main__":
     verify()

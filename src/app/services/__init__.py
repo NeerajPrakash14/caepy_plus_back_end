@@ -39,17 +39,10 @@ def get_prompt_session_service():
     return _get()
 
 
-def get_linqmd_sync_service():
-    """Get the global LinQMD sync service instance."""
-    from .linqmd_sync_service import get_linqmd_sync_service as _get
-    return _get()
-
-
 __all__ = [
     "get_extraction_service",
     "get_gemini_service",
     "get_voice_service",
     "get_blob_storage_service",
     "get_prompt_session_service",
-    "get_linqmd_sync_service",
 ]

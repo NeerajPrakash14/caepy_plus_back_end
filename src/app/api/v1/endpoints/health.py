@@ -6,6 +6,8 @@ Provides health and readiness endpoints for orchestration systems.
 import time
 from typing import Annotated
 
+import structlog
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ....core.config import Settings, get_settings
 from ....core.responses import HealthCheck, HealthResponse
 from ....db.session import get_db
+
+log = structlog.get_logger(__name__)
 
 router = APIRouter()
 
@@ -48,9 +52,10 @@ async def health_check(
             message="Connected",
         )
     except Exception as e:
+        log.error("db_health_check_failed", error=str(e))
         checks["database"] = HealthCheck(
             status="unhealthy",
-            message=str(e),
+            message="Database connection failed",
         )
 
     # AI service check (just config validation)

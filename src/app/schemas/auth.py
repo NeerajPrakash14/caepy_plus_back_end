@@ -10,6 +10,33 @@ import re
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+def _normalise_indian_mobile(v: str) -> str:
+    """Normalise and validate an Indian mobile number.
+
+    Strips spaces/dashes, removes a leading ``+91`` or ``91`` country-code
+    prefix, then validates that the result is a 10-digit number beginning
+    with 6–9.
+
+    Returns the normalised 10-digit string.
+    Raises ``ValueError`` on invalid input.
+    """
+    cleaned = re.sub(r"[\s\-]", "", v)
+
+    # Remove +91 or 91 prefix if present
+    if cleaned.startswith("+91"):
+        cleaned = cleaned[3:]
+    elif cleaned.startswith("91") and len(cleaned) == 12:
+        cleaned = cleaned[2:]
+
+    # Validate 10-digit number starting with 6-9
+    if not re.match(r"^[6-9]\d{9}$", cleaned):
+        raise ValueError(
+            "Invalid mobile number. Must be a 10-digit Indian mobile number starting with 6-9"
+        )
+
+    return cleaned
+
+
 class OTPRequestSchema(BaseModel):
     """Request schema for sending OTP to mobile number."""
 
@@ -23,22 +50,7 @@ class OTPRequestSchema(BaseModel):
     @classmethod
     def validate_mobile_number(cls, v: str) -> str:
         """Validate Indian mobile number format."""
-        # Remove any spaces, dashes, or country code prefix
-        cleaned = re.sub(r"[\s\-]", "", v)
-
-        # Remove +91 or 91 prefix if present
-        if cleaned.startswith("+91"):
-            cleaned = cleaned[3:]
-        elif cleaned.startswith("91") and len(cleaned) == 12:
-            cleaned = cleaned[2:]
-
-        # Validate 10-digit number starting with 6-9
-        if not re.match(r"^[6-9]\d{9}$", cleaned):
-            raise ValueError(
-                "Invalid mobile number. Must be a 10-digit Indian mobile number starting with 6-9"
-            )
-
-        return cleaned
+        return _normalise_indian_mobile(v)
 
 class OTPRequestResponse(BaseModel):
     """Response schema after OTP is sent."""
@@ -71,7 +83,7 @@ class OTPVerifySchema(BaseModel):
     otp: str = Field(
         ...,
         min_length=4,
-        max_length=6,
+        max_length=8,  # Matches OTP_LENGTH config range (4–8 digits)
         description="OTP code received via SMS",
         examples=["123456"],
     )
@@ -80,19 +92,7 @@ class OTPVerifySchema(BaseModel):
     @classmethod
     def validate_mobile_number(cls, v: str) -> str:
         """Validate Indian mobile number format."""
-        cleaned = re.sub(r"[\s\-]", "", v)
-
-        if cleaned.startswith("+91"):
-            cleaned = cleaned[3:]
-        elif cleaned.startswith("91") and len(cleaned) == 12:
-            cleaned = cleaned[2:]
-
-        if not re.match(r"^[6-9]\d{9}$", cleaned):
-            raise ValueError(
-                "Invalid mobile number. Must be a 10-digit Indian mobile number starting with 6-9"
-            )
-
-        return cleaned
+        return _normalise_indian_mobile(v)
 
     @field_validator("otp")
     @classmethod

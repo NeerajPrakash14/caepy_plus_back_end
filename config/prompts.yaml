@@ -58,6 +58,7 @@ resume_extraction:
 
     ### Registration (registration object)
     - **medical_registration_number**: Complete license/registration number
+    - **medical_council**: Full name of the medical council that issued the registration (e.g. "Maharashtra Medical Council", "Medical Council of India")
     - **registration_year**: Year of registration (integer)
     - **registration_authority**: Issuing authority/council
 
@@ -126,6 +127,7 @@ resume_extraction:
       },
       "registration": {
         "medical_registration_number": "string or null",
+        "medical_council": "string or null",
         "registration_year": "integer or null",
         "registration_authority": "string or null"
       },
@@ -352,7 +354,12 @@ voice_onboarding:
       clarify: "Could you please repeat your registration number? I want to make sure it's accurate."
       confirm: "Your registration number is {value}. Can you confirm that's correct?"
       important: "This is important for verification, so please speak clearly."
-    
+
+    medical_council:
+      initial: "Which medical council issued your registration? For example, Maharashtra Medical Council or Medical Council of India."
+      clarify: "Could you please specify the name of the medical council that issued your registration certificate?"
+      confirm: "Your registration was issued by {value}. Is that correct?"
+
     registration_year:
       initial: "In what year were you registered?"
       clarify: "Could you confirm your registration year?"

@@ -1,0 +1,23 @@
+# =============================================================================
+# Development & Testing Dependencies
+# =============================================================================
+# Install alongside the main requirements for local development:
+#   pip install -r requirements.txt -r requirements-dev.txt
+#
+# These are NOT installed in the production Docker image (Dockerfile.app).
+# =============================================================================
+
+-r requirements.txt
+
+# Testing framework
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+
+# Async SQLite for in-memory test database (no Postgres required for unit tests)
+aiosqlite>=0.20.0
+
+# HTTP client for integration tests
+httpx>=0.28.0
+
+# Code quality
+ruff>=0.8.0

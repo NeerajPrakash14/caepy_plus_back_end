@@ -1,13 +1,5 @@
-"""Database package - Session management and base models."""
-from .session import (
-    Base,
-    DatabaseManager,
-    DbSession,
-    close_db,
-    get_db,
-    get_db_manager,
-    init_db,
-)
+"""Database package."""
+from .session import Base, DatabaseManager, DbSession, close_db, get_db, get_db_manager
 
 __all__ = [
     "Base",
@@ -16,5 +8,4 @@ __all__ = [
     "close_db",
     "get_db",
     "get_db_manager",
-    "init_db",
 ]
