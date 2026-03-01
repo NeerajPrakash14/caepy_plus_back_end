@@ -52,7 +52,7 @@ class PromptManager:
             config_path: Path to prompts.yaml. Defaults to config/prompts.yaml
         """
         if config_path is None:
-            # Default to config/prompts.yaml relative to project root
+            # Default to config/prompts.yaml relative to project root (three levels above src/app/core/)
             config_path = Path(__file__).parent.parent.parent.parent / "config" / "prompts.yaml"
 
         self.config_path = config_path

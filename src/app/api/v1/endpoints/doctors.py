@@ -17,7 +17,6 @@ were consolidated here to reduce duplication (team-lead review comment #3/#4).
 """
 from __future__ import annotations
 
-import asyncio
 import csv
 import io
 from pathlib import Path
@@ -170,15 +169,14 @@ async def list_doctors(
         # Enriched admin view — sourced from doctor_identity with eager-loaded
         # related rows (3 fixed-cost IN-clause queries via selectinload).
         onboarding_repo = OnboardingRepository(db)
-        identities, total = await asyncio.gather(
-            onboarding_repo.list_identities(
-                status=onboarding_status.value,
-                skip=skip,
-                limit=page_size,
-                eager_load=True,
-            ),
-            onboarding_repo.count_identities_by_status(status=onboarding_status.value),
+        # Execute sequentially to avoid session state conflicts
+        identities = await onboarding_repo.list_identities(
+            status=onboarding_status.value,
+            skip=skip,
+            limit=page_size,
+            eager_load=True,
         )
+        total = await onboarding_repo.count_identities_by_status(status=onboarding_status.value)
         data: list = [
             DoctorWithFullInfoResponse(
                 identity=identity,
@@ -191,10 +189,9 @@ async def list_doctors(
         message = f"Found {total} doctor(s) with status '{onboarding_status.value}'"
     else:
         # Lightweight basic list
-        all_doctors, total = await asyncio.gather(
-            repo.get_all(skip=skip, limit=page_size, specialization=specialization),
-            repo.count(specialization=specialization),
-        )
+        # Execute sequentially to avoid session state conflicts
+        all_doctors = await repo.get_all(skip=skip, limit=page_size, specialization=specialization)
+        total = await repo.count(specialization=specialization)
         data = [DoctorResponse.model_validate(d) for d in all_doctors]
         message = "Doctors retrieved successfully"
 

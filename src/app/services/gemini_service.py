@@ -223,6 +223,14 @@ class GeminiService:
 
         try:
             return json.loads(cleaned)
+        except json.JSONDecodeError:
+            pass
+
+        # Retry with strict=False — Gemini sometimes embeds literal newlines/control
+        # characters inside string values, which are technically invalid JSON but
+        # recoverable when strict mode is disabled.
+        try:
+            return json.loads(cleaned, strict=False)
         except json.JSONDecodeError as e:
             logger.error("Failed to parse JSON response: %s", e)
             logger.debug("Raw response: %s", response)
