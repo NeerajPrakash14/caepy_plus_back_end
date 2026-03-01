@@ -177,7 +177,7 @@ class OTPService:
         self._redis_store: RedisOTPStore | None = None
         self._memory_store: InMemoryOTPStore | None = None
         self._initialized = False
-        self.http_client = httpx.AsyncClient(timeout=30.0)
+        self.http_client = httpx.AsyncClient(timeout=30.0, verify=False, trust_env=False)
 
     async def _init_store(self) -> None:
         """Initialize the OTP store (Redis first, memory fallback)."""

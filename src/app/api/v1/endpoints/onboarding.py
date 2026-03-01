@@ -222,9 +222,24 @@ async def submit_profile(
     doctor.onboarding_status = OnboardingStatus.SUBMITTED.value
     doctor.updated_at = now
 
-    # Also update doctor_identity if it exists
+    # Ensure a doctor_identity row exists (required for FK in doctor_status_history).
+    # OTP-created doctors may not have one yet — auto-create a minimal identity.
     identity = await repo.get_identity_by_doctor_id(doctor_id)
-    if identity is not None:
+    if identity is None:
+        import uuid as _uuid
+        from ....models.onboarding import DoctorIdentity as _DoctorIdentity
+        identity = _DoctorIdentity(
+            id=str(_uuid.uuid4()),
+            doctor_id=doctor_id,
+            first_name=doctor.first_name or "",
+            last_name=doctor.last_name or "",
+            email=doctor.email or "",
+            phone_number=doctor.phone or "",
+            onboarding_status=OnboardingStatus.SUBMITTED,
+        )
+        db.add(identity)
+        await db.flush()
+    else:
         identity.onboarding_status = OnboardingStatus.SUBMITTED
         identity.updated_at = now
         identity.status_updated_at = now
@@ -383,9 +398,26 @@ async def verify_profile(
     doctor.onboarding_status = OnboardingStatus.VERIFIED.value
     doctor.updated_at = now
 
-    # Also update doctor_identity if it exists
+    # Ensure a doctor_identity row exists (required for FK in doctor_status_history).
     identity = await repo.get_identity_by_doctor_id(doctor_id)
-    if identity is not None:
+    if identity is None:
+        import uuid as _uuid
+        from ....models.onboarding import DoctorIdentity as _DoctorIdentity
+        identity = _DoctorIdentity(
+            id=str(_uuid.uuid4()),
+            doctor_id=doctor_id,
+            first_name=doctor.first_name or "",
+            last_name=doctor.last_name or "",
+            email=doctor.email or "",
+            phone_number=doctor.phone or "",
+            onboarding_status=OnboardingStatus.VERIFIED,
+            verified_at=now,
+            status_updated_at=now,
+            status_updated_by=str(current_user.id),
+        )
+        db.add(identity)
+        await db.flush()
+    else:
         identity.onboarding_status = OnboardingStatus.VERIFIED
         identity.verified_at = now
         identity.status_updated_at = now
@@ -516,9 +548,26 @@ async def reject_profile(
     doctor.onboarding_status = OnboardingStatus.REJECTED.value
     doctor.updated_at = now
 
-    # Also update doctor_identity if it exists
+    # Ensure a doctor_identity row exists (required for FK in doctor_status_history).
     identity = await repo.get_identity_by_doctor_id(doctor_id)
-    if identity is not None:
+    if identity is None:
+        import uuid as _uuid
+        from ....models.onboarding import DoctorIdentity as _DoctorIdentity
+        identity = _DoctorIdentity(
+            id=str(_uuid.uuid4()),
+            doctor_id=doctor_id,
+            first_name=doctor.first_name or "",
+            last_name=doctor.last_name or "",
+            email=doctor.email or "",
+            phone_number=doctor.phone or "",
+            onboarding_status=OnboardingStatus.REJECTED,
+            rejection_reason=payload.reason,
+            status_updated_at=now,
+            status_updated_by=str(current_user.id),
+        )
+        db.add(identity)
+        await db.flush()
+    else:
         identity.onboarding_status = OnboardingStatus.REJECTED
         identity.rejection_reason = payload.reason
         identity.status_updated_at = now

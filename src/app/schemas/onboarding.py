@@ -46,6 +46,8 @@ class DoctorIdentityBase(BaseModel):
 class DoctorIdentityCreate(DoctorIdentityBase):
     """Payload for creating a doctor_identity."""
 
+    doctor_id: int | None = None
+
 class DoctorIdentityResponse(DoctorIdentityBase):
     """API response model for doctor_identity."""
 
